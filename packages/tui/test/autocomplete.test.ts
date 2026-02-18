@@ -245,6 +245,23 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.ok(!values?.includes("@src/utils/helpers.ts"));
 		});
 
+		test("fuzzy matches non-consecutive characters (e.g. imts -> interactive-mode.ts)", async () => {
+			setupFolder(baseDir, {
+				files: {
+					"src/interactive-mode.ts": "export {};",
+					"src/utils.ts": "export {};",
+					"src/index.ts": "export {};",
+				},
+			});
+
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const line = "@imts";
+			const result = await getSuggestions(provider, [line], 0, line.length);
+
+			const values = result?.items.map((item) => item.value);
+			assert.ok(values?.includes("@src/interactive-mode.ts"));
+		});
+
 		test("scopes fuzzy search to relative directories and searches recursively", async () => {
 			setupFolder(outsideDir, {
 				files: {
