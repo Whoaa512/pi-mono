@@ -81,6 +81,14 @@ function loadProjectContextFiles(
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
 
+	// Check ~/.claude/ for CLAUDE.md (Claude Code compatibility)
+	const claudeDir = join(homedir(), ".claude");
+	const claudeContext = loadContextFileFromDir(claudeDir);
+	if (claudeContext) {
+		contextFiles.push(claudeContext);
+		seenPaths.add(claudeContext.path);
+	}
+
 	const globalContext = loadContextFileFromDir(resolvedAgentDir);
 	if (globalContext) {
 		contextFiles.push(globalContext);
