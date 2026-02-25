@@ -5,7 +5,15 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Editor, type EditorTheme, Key, matchesKey, Text, truncateToWidth } from "@mariozechner/pi-tui";
+import {
+	Editor,
+	type EditorTheme,
+	Key,
+	matchesKey,
+	Text,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 interface OptionWithDesc {
@@ -140,11 +148,17 @@ export default function question(pi: ExtensionAPI) {
 
 						const lines: string[] = [];
 						const add = (s: string) => lines.push(truncateToWidth(s, width));
+						const wrap = (s: string, indent = "") => {
+							const wrapped = wrapTextWithAnsi(s, width - indent.length);
+							lines.push(wrapped[0]);
+							for (let j = 1; j < wrapped.length; j++) lines.push(indent + wrapped[j]);
+						};
 
 						add(theme.fg("accent", "─".repeat(width)));
-						add(theme.fg("text", ` ${params.question}`));
+						wrap(theme.fg("text", ` ${params.question}`), " ");
 						lines.push("");
 
+						const indent = "     ";
 						for (let i = 0; i < allOptions.length; i++) {
 							const opt = allOptions[i];
 							const selected = i === optionIndex;
@@ -152,16 +166,15 @@ export default function question(pi: ExtensionAPI) {
 							const prefix = selected ? theme.fg("accent", "> ") : "  ";
 
 							if (isOther && editMode) {
-								add(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`));
+								wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`), indent);
 							} else if (selected) {
-								add(prefix + theme.fg("accent", `${i + 1}. ${opt.label}`));
+								wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label}`), indent);
 							} else {
-								add(`  ${theme.fg("text", `${i + 1}. ${opt.label}`)}`);
+								wrap(`  ${theme.fg("text", `${i + 1}. ${opt.label}`)}`, indent);
 							}
 
-							// Show description if present
 							if (opt.description) {
-								add(`     ${theme.fg("muted", opt.description)}`);
+								wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
 							}
 						}
 
