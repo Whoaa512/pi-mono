@@ -1,0 +1,5 @@
+/Users/cjw/code/pi-mono/packages/coding-agent/examples/extensions/questionnaire.ts
+/Users/cjw/code/pi-mono/packages/coding-agent/examples/extensions/claude-rules.ts
+/Users/cjw/code/pi-mono/packages/coding-agent/examples/extensions/todo.ts
+/Users/cjw/code/pi-mono/packages/coding-agent/examples/extensions/subagent/README.md
+/Users/cjw/code/pi-mono/packages/coding-agent/examples/extensions/plan-mode/README.md
