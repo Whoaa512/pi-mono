@@ -25,6 +25,24 @@ const extractFrontmatter = (content: string): { yamlString: string | null; body:
 	};
 };
 
+const RISKY_YAML_CHARS = /[{}[\]*&#!|>%@`\\]/;
+
+const requoteYaml = (yamlString: string): string =>
+	yamlString
+		.split("\n")
+		.map((line) => {
+			const colonIdx = line.indexOf(":");
+			if (colonIdx === -1) return line;
+			const key = line.slice(0, colonIdx);
+			const rest = line.slice(colonIdx + 1);
+			const value = rest.trimStart();
+			if (!value || value.startsWith('"') || value.startsWith("'")) return line;
+			if (!RISKY_YAML_CHARS.test(value)) return line;
+			const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+			return `${key}: "${escaped}"`;
+		})
+		.join("\n");
+
 const parseSimpleKeyValue = (yamlString: string): Record<string, unknown> => {
 	const result: Record<string, unknown> = {};
 	for (const line of yamlString.split("\n")) {
@@ -55,8 +73,13 @@ export const parseFrontmatter = <T extends Record<string, unknown> = Record<stri
 		const parsed = parse(yamlString);
 		return { frontmatter: (parsed ?? {}) as T, body };
 	} catch {
-		const parsed = parseSimpleKeyValue(yamlString);
-		return { frontmatter: parsed as T, body };
+		try {
+			const parsed = parse(requoteYaml(yamlString));
+			return { frontmatter: (parsed ?? {}) as T, body };
+		} catch {
+			const parsed = parseSimpleKeyValue(yamlString);
+			return { frontmatter: parsed as T, body };
+		}
 	}
 };
 
