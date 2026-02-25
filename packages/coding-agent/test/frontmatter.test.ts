@@ -17,9 +17,20 @@ describe("parseFrontmatter", () => {
 		expect(body).toBe("Line one\nLine two");
 	});
 
-	it("throws on invalid YAML frontmatter", () => {
+	it("falls back to simple key-value parsing on invalid YAML", () => {
 		const input = "---\nfoo: [bar\n---\nBody";
-		expect(() => parseFrontmatter<Record<string, string>>(input)).toThrow(/at line 1, column 10/);
+		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(input);
+		expect(frontmatter.foo).toBe("[bar");
+		expect(body).toBe("Body");
+	});
+
+	it("handles unquoted description with colons (Claude Code agent format)", () => {
+		const input =
+			'---\nname: ash-marketing\ndescription: Use this agent for marketing strategy, positioning, messaging.\\n\\n<example>\\nuser: "hello"\\n</example>\nmodel: opus\n---\nBody';
+		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(input);
+		expect(frontmatter.name).toBe("ash-marketing");
+		expect(frontmatter.model).toBe("opus");
+		expect(body).toBe("Body");
 	});
 
 	it("parses | multiline yaml syntax", () => {
