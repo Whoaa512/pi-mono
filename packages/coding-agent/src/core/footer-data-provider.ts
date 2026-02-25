@@ -102,6 +102,7 @@ export class FooterDataProvider {
 	private refreshInFlight = false;
 	private refreshPending = false;
 	private disposed = false;
+	private defaultFooterRenderer: ((width: number) => string[]) | null = null;
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
@@ -167,6 +168,17 @@ export class FooterDataProvider {
 		this.gitPaths = findGitPaths(cwd);
 		this.setupGitWatcher();
 		this.notifyBranchChange();
+	}
+
+	/** Render the default footer lines. Returns empty array if no default footer is bound. */
+	renderDefault(width: number): string[] {
+		if (!this.defaultFooterRenderer) return [];
+		return this.defaultFooterRenderer(width);
+	}
+
+	/** Internal: bind the default footer's render function */
+	setDefaultFooterRenderer(renderer: (width: number) => string[]): void {
+		this.defaultFooterRenderer = renderer;
 	}
 
 	/** Internal: cleanup */
@@ -350,5 +362,5 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange" | "renderDefault"
 >;
