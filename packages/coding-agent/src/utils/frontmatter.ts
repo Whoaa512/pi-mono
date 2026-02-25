@@ -25,6 +25,25 @@ const extractFrontmatter = (content: string): { yamlString: string | null; body:
 	};
 };
 
+const parseSimpleKeyValue = (yamlString: string): Record<string, unknown> => {
+	const result: Record<string, unknown> = {};
+	for (const line of yamlString.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const colonIdx = trimmed.indexOf(":");
+		if (colonIdx === -1) continue;
+		const key = trimmed.slice(0, colonIdx).trim();
+		let value: string | boolean = trimmed.slice(colonIdx + 1).trim();
+		if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+			value = value.slice(1, -1);
+		}
+		if (value === "true") result[key] = true;
+		else if (value === "false") result[key] = false;
+		else result[key] = value;
+	}
+	return result;
+};
+
 export const parseFrontmatter = <T extends Record<string, unknown> = Record<string, unknown>>(
 	content: string,
 ): ParsedFrontmatter<T> => {
@@ -32,8 +51,13 @@ export const parseFrontmatter = <T extends Record<string, unknown> = Record<stri
 	if (!yamlString) {
 		return { frontmatter: {} as T, body };
 	}
-	const parsed = parse(yamlString);
-	return { frontmatter: (parsed ?? {}) as T, body };
+	try {
+		const parsed = parse(yamlString);
+		return { frontmatter: (parsed ?? {}) as T, body };
+	} catch {
+		const parsed = parseSimpleKeyValue(yamlString);
+		return { frontmatter: parsed as T, body };
+	}
 };
 
 export const stripFrontmatter = (content: string): string => parseFrontmatter(content).body;
