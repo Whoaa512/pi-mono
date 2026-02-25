@@ -767,9 +767,27 @@ ctx.ui.setWidget("my-widget", undefined);
 
 ### Pattern 6: Custom Footer
 
-Replace the footer. `footerData` exposes data not otherwise accessible to extensions.
+Replace or extend the footer. `footerData` exposes data not otherwise accessible to extensions, plus `renderDefault(width)` to compose on top of the built-in footer.
 
 ```typescript
+// Compose: get default footer lines and modify them
+ctx.ui.setFooter((tui, theme, footerData) => ({
+  invalidate() {},
+  render(width: number): string[] {
+    const lines = footerData.renderDefault(width);
+    // Append session ID to the right of the first (pwd) line
+    const label = theme.fg("dim", "my-info");
+    const labelWidth = visibleWidth(label);
+    if (lines.length > 0 && visibleWidth(lines[0]!) + 2 + labelWidth <= width) {
+      const pad = " ".repeat(width - visibleWidth(lines[0]!) - labelWidth);
+      lines[0] = lines[0]! + pad + label;
+    }
+    return lines;
+  },
+  dispose: footerData.onBranchChange(() => tui.requestRender()),
+}));
+
+// Or replace entirely
 ctx.ui.setFooter((tui, theme, footerData) => ({
   invalidate() {},
   render(width: number): string[] {
@@ -777,7 +795,7 @@ ctx.ui.setFooter((tui, theme, footerData) => ({
     // footerData.getExtensionStatuses(): ReadonlyMap<string, string>
     return [`${ctx.model?.id} (${footerData.getGitBranch() || "no git"})`];
   },
-  dispose: footerData.onBranchChange(() => tui.requestRender()), // reactive
+  dispose: footerData.onBranchChange(() => tui.requestRender()),
 }));
 
 ctx.ui.setFooter(undefined); // restore default

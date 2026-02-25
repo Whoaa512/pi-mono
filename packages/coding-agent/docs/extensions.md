@@ -1641,9 +1641,14 @@ ctx.ui.setWidget("my-widget", ["Line 1", "Line 2"], { placement: "belowEditor" }
 ctx.ui.setWidget("my-widget", (tui, theme) => new Text(theme.fg("accent", "Custom"), 0, 0));
 ctx.ui.setWidget("my-widget", undefined);  // Clear
 
-// Custom footer (replaces built-in footer entirely)
-ctx.ui.setFooter((tui, theme) => ({
-  render(width) { return [theme.fg("dim", "Custom footer")]; },
+// Custom footer (replaces built-in footer entirely, or compose on default)
+ctx.ui.setFooter((tui, theme, footerData) => ({
+  render(width) {
+    // Get default footer lines and modify them
+    const lines = footerData.renderDefault(width);
+    // Or return completely custom lines
+    return lines.length > 0 ? lines : [theme.fg("dim", "Custom footer")];
+  },
   invalidate() {},
 }));
 ctx.ui.setFooter(undefined);  // Restore built-in footer

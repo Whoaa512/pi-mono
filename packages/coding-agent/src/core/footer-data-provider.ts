@@ -43,6 +43,7 @@ export class FooterDataProvider {
 	private gitWatcher: FSWatcher | null = null;
 	private branchChangeCallbacks = new Set<() => void>();
 	private availableProviderCount = 0;
+	private defaultFooterRenderer: ((width: number) => string[]) | null = null;
 
 	constructor() {
 		this.setupGitWatcher();
@@ -101,6 +102,17 @@ export class FooterDataProvider {
 		this.availableProviderCount = count;
 	}
 
+	/** Render the default footer lines. Returns empty array if no default footer is bound. */
+	renderDefault(width: number): string[] {
+		if (!this.defaultFooterRenderer) return [];
+		return this.defaultFooterRenderer(width);
+	}
+
+	/** Internal: bind the default footer's render function */
+	setDefaultFooterRenderer(renderer: (width: number) => string[]): void {
+		this.defaultFooterRenderer = renderer;
+	}
+
 	/** Internal: cleanup */
 	dispose(): void {
 		if (this.gitWatcher) {
@@ -140,5 +152,5 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange" | "renderDefault"
 >;
