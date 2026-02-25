@@ -97,14 +97,15 @@ describe("skills", () => {
 			expect(diagnostics.some((d: ResourceDiagnostic) => d.message.includes("description is required"))).toBe(true);
 		});
 
-		it("should warn and skip skill when YAML frontmatter is invalid", () => {
-			const { skills, diagnostics } = loadSkillsFromDir({
+		it("should fallback to simple parsing when YAML frontmatter is invalid", () => {
+			const { skills } = loadSkillsFromDir({
 				dir: join(fixturesDir, "invalid-yaml"),
 				source: "test",
 			});
 
-			expect(skills).toHaveLength(0);
-			expect(diagnostics.some((d: ResourceDiagnostic) => d.message.includes("at line"))).toBe(true);
+			expect(skills).toHaveLength(1);
+			expect(skills[0].name).toBe("invalid-yaml");
+			expect(skills[0].description).toBe("[unclosed bracket");
 		});
 
 		it("should preserve multiline descriptions from YAML", () => {
