@@ -250,6 +250,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			return "";
 		},
 
+		addToEditorHistory(_text: string): void {
+			// Editor history not supported in RPC mode
+		},
+
 		async editor(title: string, prefill?: string): Promise<string | undefined> {
 			const id = crypto.randomUUID();
 			return new Promise((resolve, reject) => {
