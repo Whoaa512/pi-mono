@@ -73,6 +73,7 @@ import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.j
 import { createCompactionSummaryMessage } from "../../core/messages.js";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
+import { loadPromptHistory, savePromptToHistory } from "../../core/prompt-history.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
@@ -653,6 +654,9 @@ export class InteractiveMode {
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
+
+		// Load cross-session prompt history first so session messages stack on top
+		this.loadCrossSessionHistory();
 
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
@@ -1963,6 +1967,10 @@ export class InteractiveMode {
 			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
 			setEditorText: (text) => this.editor.setText(text),
 			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
+			addToEditorHistory: (text) => {
+				this.editor.addToHistory?.(text);
+				savePromptToHistory(text);
+			},
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			addAutocompleteProvider: (factory) => {
 				this.autocompleteProviderWrappers.push(factory);
@@ -2578,6 +2586,7 @@ export class InteractiveMode {
 						return;
 					}
 					this.editor.addToHistory?.(text);
+					savePromptToHistory(text);
 					await this.handleBashCommand(command, isExcluded);
 					this.isBashMode = false;
 					this.updateEditorBorderColor();
@@ -2589,6 +2598,7 @@ export class InteractiveMode {
 			if (this.session.isCompacting) {
 				if (this.isExtensionCommand(text)) {
 					this.editor.addToHistory?.(text);
+					savePromptToHistory(text);
 					this.editor.setText("");
 					await this.session.prompt(text);
 				} else {
@@ -2601,6 +2611,7 @@ export class InteractiveMode {
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
+				savePromptToHistory(text);
 				this.editor.setText("");
 				await this.session.prompt(text, { streamingBehavior: "steer" });
 				this.updatePendingMessagesDisplay();
@@ -2616,6 +2627,7 @@ export class InteractiveMode {
 				this.onInputCallback(text);
 			}
 			this.editor.addToHistory?.(text);
+			savePromptToHistory(text);
 		};
 	}
 
@@ -3184,6 +3196,13 @@ export class InteractiveMode {
 		}
 	}
 
+	private loadCrossSessionHistory(): void {
+		const prompts = loadPromptHistory();
+		for (let i = prompts.length - 1; i >= 0; i--) {
+			this.editor.addToHistory?.(prompts[i]);
+		}
+	}
+
 	async getUserInput(): Promise<string> {
 		return new Promise((resolve) => {
 			this.onInputCallback = (text: string) => {
@@ -3340,6 +3359,7 @@ export class InteractiveMode {
 		if (this.session.isCompacting) {
 			if (this.isExtensionCommand(text)) {
 				this.editor.addToHistory?.(text);
+				savePromptToHistory(text);
 				this.editor.setText("");
 				await this.session.prompt(text);
 			} else {
@@ -3352,6 +3372,7 @@ export class InteractiveMode {
 		// This handles extension commands (execute immediately), prompt template expansion, and queueing
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
+			savePromptToHistory(text);
 			this.editor.setText("");
 			await this.session.prompt(text, { streamingBehavior: "followUp" });
 			this.updatePendingMessagesDisplay();
@@ -3637,6 +3658,7 @@ export class InteractiveMode {
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
 		this.compactionQueuedMessages.push({ text, mode });
 		this.editor.addToHistory?.(text);
+		savePromptToHistory(text);
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
 		this.showStatus("Queued message for after compaction");
