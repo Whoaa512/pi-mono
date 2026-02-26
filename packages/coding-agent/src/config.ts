@@ -239,3 +239,8 @@ export function getSessionsDir(): string {
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);
 }
+
+/** Get path to cross-session prompt history file */
+export function getPromptHistoryPath(): string {
+	return join(getAgentDir(), "prompt-history.json");
+}
