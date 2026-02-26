@@ -1660,6 +1660,9 @@ ctx.ui.setTitle("pi - my-project");
 ctx.ui.setEditorText("Prefill text");
 const current = ctx.ui.getEditorText();
 
+// Editor prompt history (up/down arrow navigation)
+ctx.ui.addToEditorHistory("previous prompt");  // Persists across sessions
+
 // Paste into editor (triggers paste handling, including collapse for large content)
 ctx.ui.pasteToEditor("pasted content");
 
