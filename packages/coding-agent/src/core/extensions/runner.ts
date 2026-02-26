@@ -186,6 +186,7 @@ const noOpUIContext: ExtensionUIContext = {
 	pasteToEditor: () => {},
 	setEditorText: () => {},
 	getEditorText: () => "",
+	addToEditorHistory: () => {},
 	editor: async () => undefined,
 	setEditorComponent: () => {},
 	get theme() {
