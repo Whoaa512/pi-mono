@@ -222,7 +222,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 
 					// Submit tab
 					if (currentTab === questions.length) {
-						if (matchesKey(data, Key.enter) && allAnswered()) {
+						if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && allAnswered()) {
 							submit(false);
 						} else if (matchesKey(data, Key.escape)) {
 							submit(true);
@@ -243,7 +243,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 					}
 
 					// Select option
-					if (matchesKey(data, Key.enter) && q) {
+					if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && q) {
 						const opt = opts[optionIndex];
 						if (opt.isOther) {
 							inputMode = true;
@@ -368,8 +368,8 @@ export default function questionnaire(pi: ExtensionAPI) {
 					lines.push("");
 					if (!inputMode) {
 						const help = isMulti
-							? " Tab/←→ navigate • ↑↓ select • Enter confirm • Esc cancel"
-							: " ↑↓ navigate • Enter select • Esc cancel";
+							? " Tab/←→ navigate • ↑↓ select • Space/Enter confirm • Esc cancel"
+							: " ↑↓ navigate • Space/Enter select • Esc cancel";
 						add(theme.fg("dim", help));
 					}
 					add(theme.fg("accent", "─".repeat(width)));
