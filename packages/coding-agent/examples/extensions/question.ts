@@ -127,7 +127,7 @@ export default function question(pi: ExtensionAPI) {
 							return;
 						}
 
-						if (matchesKey(data, Key.enter)) {
+						if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
 							const selected = allOptions[optionIndex];
 							if (selected.isOther) {
 								editMode = true;
@@ -190,7 +190,7 @@ export default function question(pi: ExtensionAPI) {
 						if (editMode) {
 							add(theme.fg("dim", " Enter to submit • Esc to go back"));
 						} else {
-							add(theme.fg("dim", " ↑↓ navigate • Enter to select • Esc to cancel"));
+							add(theme.fg("dim", " ↑↓ navigate • Space/Enter to select • Esc to cancel"));
 						}
 						add(theme.fg("accent", "─".repeat(width)));
 
