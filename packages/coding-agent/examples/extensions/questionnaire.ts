@@ -32,6 +32,7 @@ interface Question {
 	prompt: string;
 	options: QuestionOption[];
 	allowOther: boolean;
+	multiSelect: boolean;
 }
 
 interface Answer {
@@ -40,6 +41,9 @@ interface Answer {
 	label: string;
 	wasCustom: boolean;
 	index?: number;
+	values?: string[];
+	labels?: string[];
+	indices?: number[];
 }
 
 interface QuestionnaireResult {
@@ -65,6 +69,11 @@ const QuestionSchema = Type.Object({
 	prompt: Type.String({ description: "The full question text to display" }),
 	options: Type.Array(QuestionOptionSchema, { description: "Available options to choose from" }),
 	allowOther: Type.Optional(Type.Boolean({ description: "Allow 'Type something' option (default: true)" })),
+	multiSelect: Type.Optional(
+		Type.Boolean({
+			description: "Allow selecting multiple options (default: false). Space toggles, Enter confirms.",
+		}),
+	),
 });
 
 const QuestionnaireParams = Type.Object({
@@ -86,7 +95,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 		name: "questionnaire",
 		label: "Questionnaire",
 		description:
-			"Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. For single questions, shows a simple option list. For multiple questions, shows a tab-based interface.",
+			"Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. For single questions, shows a simple option list. For multiple questions, shows a tab-based interface. Questions can be single-select (default) or multi-select.",
 		parameters: QuestionnaireParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -101,7 +110,8 @@ export default function questionnaire(pi: ExtensionAPI) {
 			const questions: Question[] = params.questions.map((q, i) => ({
 				...q,
 				label: q.label || `Q${i + 1}`,
-				allowOther: true,
+				allowOther: q.allowOther ?? true,
+				multiSelect: q.multiSelect ?? false,
 			}));
 
 			const isMulti = questions.length > 1;
@@ -115,6 +125,8 @@ export default function questionnaire(pi: ExtensionAPI) {
 				let inputQuestionId: string | null = null;
 				let cachedLines: string[] | undefined;
 				const answers = new Map<string, Answer>();
+				const selectedSets = new Map<string, Set<number>>();
+				const customEntries = new Map<string, string[]>();
 
 				// Editor for "Type something" option
 				const editorTheme: EditorTheme = {
@@ -171,18 +183,41 @@ export default function questionnaire(pi: ExtensionAPI) {
 					refresh();
 				}
 
-				function saveAnswer(questionId: string, value: string, label: string, wasCustom: boolean, index?: number) {
-					answers.set(questionId, { id: questionId, value, label, wasCustom, index });
+				function saveAnswer(
+					questionId: string,
+					value: string,
+					label: string,
+					wasCustom: boolean,
+					index?: number,
+					values?: string[],
+					labels?: string[],
+					indices?: number[],
+				) {
+					answers.set(questionId, { id: questionId, value, label, wasCustom, index, values, labels, indices });
 				}
 
 				// Editor submit callback
 				editor.onSubmit = (value) => {
 					if (!inputQuestionId) return;
 					const trimmed = value.trim() || "(no response)";
-					saveAnswer(inputQuestionId, trimmed, trimmed, true);
+					const q = questions.find((q) => q.id === inputQuestionId);
 					inputMode = false;
-					inputQuestionId = null;
 					editor.setText("");
+
+					if (q?.multiSelect) {
+						let entries = customEntries.get(inputQuestionId);
+						if (!entries) {
+							entries = [];
+							customEntries.set(inputQuestionId, entries);
+						}
+						entries.push(trimmed);
+						inputQuestionId = null;
+						refresh();
+						return;
+					}
+
+					saveAnswer(inputQuestionId, trimmed, trimmed, true);
+					inputQuestionId = null;
 					advanceAfterAnswer();
 				};
 
@@ -245,6 +280,54 @@ export default function questionnaire(pi: ExtensionAPI) {
 					// Select option
 					if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && q) {
 						const opt = opts[optionIndex];
+
+						if (opt.isOther) {
+							inputMode = true;
+							inputQuestionId = q.id;
+							editor.setText("");
+							refresh();
+							return;
+						}
+
+						if (q.multiSelect) {
+							if (matchesKey(data, Key.space)) {
+								let set = selectedSets.get(q.id);
+								if (!set) {
+									set = new Set();
+									selectedSets.set(q.id, set);
+								}
+								if (set.has(optionIndex)) {
+									set.delete(optionIndex);
+								} else {
+									set.add(optionIndex);
+								}
+								refresh();
+								return;
+							}
+							if (matchesKey(data, Key.enter)) {
+								const set = selectedSets.get(q.id);
+								const customs = customEntries.get(q.id) || [];
+								if ((!set || set.size === 0) && customs.length === 0) return;
+								const sorted = set ? Array.from(set).sort((a, b) => a - b) : [];
+								const values = sorted.map((i) => opts[i].value).concat(customs);
+								const labels = sorted.map((i) => opts[i].label).concat(customs.map((c) => `(wrote) ${c}`));
+								const indices = sorted.map((i) => i + 1);
+								const hasCustom = customs.length > 0;
+								saveAnswer(
+									q.id,
+									values.join(", "),
+									labels.join(", "),
+									hasCustom,
+									undefined,
+									values,
+									labels,
+									indices,
+								);
+								advanceAfterAnswer();
+								return;
+							}
+						}
+
 						if (opt.isOther) {
 							inputMode = true;
 							inputQuestionId = q.id;
@@ -306,19 +389,31 @@ export default function questionnaire(pi: ExtensionAPI) {
 					// Helper to render options list
 					function renderOptions() {
 						const indent = "     ";
+						const isMultiSel = q?.multiSelect ?? false;
+						const checkedSet = q ? selectedSets.get(q.id) : undefined;
+						const customs = q ? customEntries.get(q.id) || [] : [];
 						for (let i = 0; i < opts.length; i++) {
 							const opt = opts[i];
 							const selected = i === optionIndex;
 							const isOther = opt.isOther === true;
 							const prefix = selected ? theme.fg("accent", "> ") : "  ";
 							const color = selected ? "accent" : "text";
+							const checked = checkedSet?.has(i);
+							const checkbox = isMultiSel ? (checked ? "[✓] " : "[ ] ") : "";
 							if (isOther && inputMode) {
-								wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`), indent);
+								wrap(prefix + theme.fg("accent", `${checkbox}${i + 1}. ${opt.label} ✎`), indent);
 							} else {
-								wrap(prefix + theme.fg(color, `${i + 1}. ${opt.label}`), indent);
+								wrap(prefix + theme.fg(color, `${checkbox}${i + 1}. ${opt.label}`), indent);
 							}
 							if (opt.description) {
 								wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
+							}
+						}
+						if (isMultiSel && customs.length > 0) {
+							lines.push("");
+							add(theme.fg("muted", "  Custom entries:"));
+							for (const c of customs) {
+								add(`    ${theme.fg("success", "✓")} ${theme.fg("text", c)}`);
 							}
 						}
 					}
@@ -367,9 +462,18 @@ export default function questionnaire(pi: ExtensionAPI) {
 
 					lines.push("");
 					if (!inputMode) {
-						const help = isMulti
-							? " Tab/←→ navigate • ↑↓ select • Space/Enter confirm • Esc cancel"
-							: " ↑↓ navigate • Space/Enter select • Esc cancel";
+						const currentQ = currentQuestion();
+						const isMultiSel = currentQ?.multiSelect ?? false;
+						let help: string;
+						if (isMultiSel) {
+							help = isMulti
+								? " Tab/←→ navigate • ↑↓ move • Space toggle • Enter confirm • Esc cancel"
+								: " ↑↓ navigate • Space toggle • Enter confirm • Esc cancel";
+						} else {
+							help = isMulti
+								? " Tab/←→ navigate • ↑↓ select • Space/Enter confirm • Esc cancel"
+								: " ↑↓ navigate • Space/Enter select • Esc cancel";
+						}
 						add(theme.fg("dim", help));
 					}
 					add(theme.fg("accent", "─".repeat(width)));
@@ -398,6 +502,10 @@ export default function questionnaire(pi: ExtensionAPI) {
 				const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
 				if (a.wasCustom) {
 					return `${qLabel}: user wrote: ${a.label}`;
+				}
+				if (a.values && a.values.length > 1) {
+					const items = a.labels!.map((l, i) => `${a.indices![i]}. ${l}`).join(", ");
+					return `${qLabel}: user selected: ${items}`;
 				}
 				return `${qLabel}: user selected: ${a.index}. ${a.label}`;
 			});
