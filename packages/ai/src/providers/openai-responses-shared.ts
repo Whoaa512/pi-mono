@@ -189,7 +189,7 @@ export function convertResponsesMessages<TApi extends Api>(
 						status: "completed",
 						id: msgId,
 						phase: parsedSignature?.phase,
-					} satisfies ResponseOutputMessage);
+					} as ResponseOutputMessage);
 				} else if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
 					const [callId, itemIdRaw] = toolCall.id.split("|");
@@ -426,7 +426,7 @@ export async function processResponsesStream<TApi extends Api>(
 				currentBlock = null;
 			} else if (item.type === "message" && currentBlock?.type === "text") {
 				currentBlock.text = item.content.map((c) => (c.type === "output_text" ? c.text : c.refusal)).join("");
-				currentBlock.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
+				currentBlock.textSignature = encodeTextSignatureV1(item.id, (item as any).phase ?? undefined);
 				stream.push({
 					type: "text_end",
 					contentIndex: blockIndex(),
