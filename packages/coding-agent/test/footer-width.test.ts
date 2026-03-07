@@ -68,6 +68,7 @@ function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
 			void callback;
 			return () => {};
 		},
+		renderDefault: (_width: number) => [] as string[],
 	};
 
 	return provider;
