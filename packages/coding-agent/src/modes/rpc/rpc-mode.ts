@@ -254,6 +254,10 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// Custom autocomplete not supported in RPC mode
 		},
 
+		getAutocompleteProvider() {
+			return undefined;
+		},
+
 		get theme() {
 			return theme;
 		},

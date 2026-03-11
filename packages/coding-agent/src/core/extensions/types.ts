@@ -245,6 +245,13 @@ export interface ExtensionUIContext {
 	 */
 	setAutocompleteProvider(provider: AutocompleteProvider | undefined): void;
 
+	/**
+	 * Get the current built-in autocomplete provider.
+	 * Useful for wrapping: capture the built-in, then set a custom provider
+	 * that delegates non-`@` queries to the original.
+	 */
+	getAutocompleteProvider(): AutocompleteProvider | undefined;
+
 	/** Get the current theme for styling. */
 	readonly theme: Theme;
 

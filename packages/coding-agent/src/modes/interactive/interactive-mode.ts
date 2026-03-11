@@ -1474,6 +1474,7 @@ export class InteractiveMode {
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			setEditorComponent: (factory) => this.setCustomEditorComponent(factory),
 			setAutocompleteProvider: (provider) => this.setExtensionAutocompleteProvider(provider),
+			getAutocompleteProvider: () => this.autocompleteProvider,
 			get theme() {
 				return theme;
 			},
