@@ -189,6 +189,7 @@ const noOpUIContext: ExtensionUIContext = {
 	addToEditorHistory: () => {},
 	editor: async () => undefined,
 	setEditorComponent: () => {},
+	setAutocompleteProvider: () => {},
 	get theme() {
 		return theme;
 	},

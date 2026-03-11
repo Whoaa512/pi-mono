@@ -11,6 +11,8 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
 import type {
 	AutocompleteItem,
+	AutocompleteProvider,
+	EditorAction,
 	EditorComponent,
 	EditorTheme,
 	Keybinding,
@@ -153,6 +155,7 @@ export class InteractiveMode {
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
 	private autocompleteProvider: CombinedAutocompleteProvider | undefined;
+	private extensionAutocompleteProvider: AutocompleteProvider | undefined;
 	private fdPath: string | undefined;
 	private editorContainer: Container;
 	private footer: FooterComponent;
@@ -415,9 +418,10 @@ export class InteractiveMode {
 			process.cwd(),
 			fdPath,
 		);
-		this.defaultEditor.setAutocompleteProvider(this.autocompleteProvider);
+		const activeProvider = this.extensionAutocompleteProvider ?? this.autocompleteProvider;
+		this.defaultEditor.setAutocompleteProvider(activeProvider);
 		if (this.editor !== this.defaultEditor) {
-			this.editor.setAutocompleteProvider?.(this.autocompleteProvider);
+			this.editor.setAutocompleteProvider?.(activeProvider);
 		}
 	}
 
@@ -1405,6 +1409,7 @@ export class InteractiveMode {
 		this.footerDataProvider.clearExtensionStatuses();
 		this.footer.invalidate();
 		this.setCustomEditorComponent(undefined);
+		this.setExtensionAutocompleteProvider(undefined);
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
 		if (this.loadingAnimation) {
@@ -1576,6 +1581,7 @@ export class InteractiveMode {
 			},
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			setEditorComponent: (factory) => this.setCustomEditorComponent(factory),
+			setAutocompleteProvider: (provider) => this.setExtensionAutocompleteProvider(provider),
 			get theme() {
 				return theme;
 			},
@@ -1793,8 +1799,11 @@ export class InteractiveMode {
 			}
 
 			// Set autocomplete if supported
-			if (newEditor.setAutocompleteProvider && this.autocompleteProvider) {
-				newEditor.setAutocompleteProvider(this.autocompleteProvider);
+			if (newEditor.setAutocompleteProvider) {
+				const activeProvider = this.extensionAutocompleteProvider ?? this.autocompleteProvider;
+				if (activeProvider) {
+					newEditor.setAutocompleteProvider(activeProvider);
+				}
 			}
 
 			// If extending CustomEditor, copy app-level handlers
@@ -1829,6 +1838,17 @@ export class InteractiveMode {
 		this.editorContainer.addChild(this.editor as Component);
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
+	}
+
+	private setExtensionAutocompleteProvider(provider: AutocompleteProvider | undefined): void {
+		this.extensionAutocompleteProvider = provider;
+		const activeProvider = provider ?? this.autocompleteProvider;
+		if (activeProvider) {
+			this.defaultEditor.setAutocompleteProvider(activeProvider);
+			if (this.editor !== this.defaultEditor) {
+				this.editor.setAutocompleteProvider?.(activeProvider);
+			}
+		}
 	}
 
 	/**

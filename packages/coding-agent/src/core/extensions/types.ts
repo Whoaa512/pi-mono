@@ -29,6 +29,7 @@ import type {
 } from "@mariozechner/pi-ai";
 import type {
 	AutocompleteItem,
+	AutocompleteProvider,
 	Component,
 	EditorComponent,
 	EditorTheme,
@@ -221,6 +222,29 @@ export interface ExtensionUIContext {
 	setEditorComponent(
 		factory: ((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent) | undefined,
 	): void;
+
+	/**
+	 * Replace the autocomplete provider used by the editor.
+	 * Pass undefined to restore the built-in provider (fd-based fuzzy file search).
+	 *
+	 * The provider controls what happens when the user types `@` for file references,
+	 * `/` for slash commands, or uses Tab for path completion.
+	 *
+	 * @example
+	 * ```ts
+	 * ctx.ui.setAutocompleteProvider({
+	 *   getSuggestions(lines, cursorLine, cursorCol) {
+	 *     // Custom fuzzy search logic (e.g., fzf, ripgrep)
+	 *     return { items: [...], prefix: "@query" };
+	 *   },
+	 *   applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+	 *     // Insert the selected completion
+	 *     return { lines: [...], cursorLine, cursorCol: newCol };
+	 *   }
+	 * });
+	 * ```
+	 */
+	setAutocompleteProvider(provider: AutocompleteProvider | undefined): void;
 
 	/** Get the current theme for styling. */
 	readonly theme: Theme;
