@@ -102,7 +102,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 			const questions: Question[] = params.questions.map((q, i) => ({
 				...q,
 				label: q.label || `Q${i + 1}`,
-				allowOther: q.allowOther ?? true,
+				allowOther: true,
 				multiSelect: q.multiSelect ?? false,
 			}));
 
