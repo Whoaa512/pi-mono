@@ -108,8 +108,13 @@ export function findExactModelReferenceMatch(
 /**
  * Try to match a pattern to a model from the available models list.
  * Returns the matched model or undefined if no match found.
+ * When hasAuth is provided, prefers models from authenticated providers on ambiguous matches.
  */
-function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Model<Api> | undefined {
+function tryMatchModel(
+	modelPattern: string,
+	availableModels: Model<Api>[],
+	hasAuth?: (provider: string) => boolean,
+): Model<Api> | undefined {
 	const exactMatch = findExactModelReferenceMatch(modelPattern, availableModels);
 	if (exactMatch) {
 		return exactMatch;
@@ -126,9 +131,20 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 		return undefined;
 	}
 
+	// When multiple models match and we know which providers have auth,
+	// prefer models from authenticated providers to avoid resolving to
+	// a provider the user can't actually use.
+	const effectiveMatches =
+		hasAuth && matches.length > 1
+			? (() => {
+					const authed = matches.filter((m) => hasAuth(m.provider));
+					return authed.length > 0 ? authed : matches;
+				})()
+			: matches;
+
 	// Separate into aliases and dated versions
-	const aliases = matches.filter((m) => isAlias(m.id));
-	const datedVersions = matches.filter((m) => !isAlias(m.id));
+	const aliases = effectiveMatches.filter((m) => isAlias(m.id));
+	const datedVersions = effectiveMatches.filter((m) => !isAlias(m.id));
 
 	if (aliases.length > 0) {
 		// Prefer alias - if multiple aliases, pick the one that sorts highest
@@ -180,10 +196,11 @@ function buildFallbackModel(provider: string, modelId: string, availableModels: 
 export function parseModelPattern(
 	pattern: string,
 	availableModels: Model<Api>[],
-	options?: { allowInvalidThinkingLevelFallback?: boolean },
+	options?: { allowInvalidThinkingLevelFallback?: boolean; hasAuth?: (provider: string) => boolean },
 ): ParsedModelResult {
+	const hasAuth = options?.hasAuth;
 	// Try exact match first
-	const exactMatch = tryMatchModel(pattern, availableModels);
+	const exactMatch = tryMatchModel(pattern, availableModels, hasAuth);
 	if (exactMatch) {
 		return { model: exactMatch, thinkingLevel: undefined, warning: undefined };
 	}
@@ -404,8 +421,10 @@ export function resolveCliModel(options: {
 	}
 
 	const candidates = provider ? availableModels.filter((m) => m.provider === provider) : availableModels;
+	const hasAuth = (p: string) => modelRegistry.hasAuth(p);
 	const { model, thinkingLevel, warning } = parseModelPattern(pattern, candidates, {
 		allowInvalidThinkingLevelFallback: false,
+		hasAuth,
 	});
 
 	if (model) {
@@ -427,6 +446,7 @@ export function resolveCliModel(options: {
 		// Also try parseModelPattern on the full input against all models
 		const fallback = parseModelPattern(cliModel, availableModels, {
 			allowInvalidThinkingLevelFallback: false,
+			hasAuth,
 		});
 		if (fallback.model) {
 			return {
