@@ -204,6 +204,65 @@ describe("parseModelPattern", () => {
 			expect(result.warning).toContain("Invalid thinking level");
 		});
 	});
+
+	describe("auth-aware matching", () => {
+		test("prefers model from authenticated provider on ambiguous fuzzy match", () => {
+			const bedrockOpus: Model<"anthropic-messages"> = {
+				id: "anthropic.claude-opus-4-6-v1",
+				name: "Claude Opus 4.6",
+				api: "anthropic-messages",
+				provider: "amazon-bedrock",
+				baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
+				contextWindow: 200000,
+				maxTokens: 8192,
+			};
+			const customOpus: Model<"anthropic-messages"> = {
+				id: "global.anthropic.claude-opus-4-6-v1",
+				name: "claude-opus-4.6",
+				api: "anthropic-messages",
+				provider: "devai",
+				baseUrl: "https://devai.example.com/v1",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
+				contextWindow: 200000,
+				maxTokens: 8192,
+			};
+			const models = [bedrockOpus, customOpus];
+			const hasAuth = (p: string) => p === "devai";
+
+			const result = parseModelPattern("opus", models, { hasAuth });
+			expect(result.model?.provider).toBe("devai");
+		});
+
+		test("falls back to all matches when no provider has auth", () => {
+			const bedrockOpus: Model<"anthropic-messages"> = {
+				id: "anthropic.claude-opus-4-6-v1",
+				name: "Claude Opus 4.6",
+				api: "anthropic-messages",
+				provider: "amazon-bedrock",
+				baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
+				contextWindow: 200000,
+				maxTokens: 8192,
+			};
+			const hasAuth = (_p: string) => false;
+
+			const result = parseModelPattern("opus", [bedrockOpus], { hasAuth });
+			expect(result.model?.provider).toBe("amazon-bedrock");
+		});
+
+		test("without hasAuth, behaves as before (no preference)", () => {
+			const result = parseModelPattern("sonnet", allModels);
+			expect(result.model?.id).toBe("claude-sonnet-4-5");
+			expect(result.thinkingLevel).toBeUndefined();
+		});
+	});
 });
 
 describe("resolveCliModel", () => {
@@ -369,6 +428,46 @@ describe("resolveCliModel", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.model?.provider).toBe("openrouter");
 		expect(result.model?.id).toBe("qwen/qwen3-coder:exacto");
+	});
+
+	test("prefers authed provider when fuzzy pattern matches multiple providers", () => {
+		const bedrockOpus: Model<"anthropic-messages"> = {
+			id: "anthropic.claude-opus-4-6-v1",
+			name: "Claude Opus 4.6",
+			api: "anthropic-messages",
+			provider: "amazon-bedrock",
+			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		};
+		const customOpus: Model<"anthropic-messages"> = {
+			id: "global.anthropic.claude-opus-4-6-v1",
+			name: "claude-opus-4.6",
+			api: "anthropic-messages",
+			provider: "devai",
+			baseUrl: "https://devai.example.com/v1",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		};
+		const modelsWithOpus = [...allModels, bedrockOpus, customOpus];
+		const registry = {
+			getAll: () => modelsWithOpus,
+			hasAuth: (p: string) => p === "devai",
+		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+		const result = resolveCliModel({
+			cliModel: "opus",
+			modelRegistry: registry,
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("devai");
 	});
 });
 

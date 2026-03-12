@@ -509,6 +509,13 @@ export class ModelRegistry {
 	}
 
 	/**
+	 * Check if a provider has auth configured (env var, stored key, or OAuth).
+	 */
+	hasAuth(provider: string): boolean {
+		return this.authStorage.hasAuth(provider);
+	}
+
+	/**
 	 * Find a model by provider and ID.
 	 */
 	find(provider: string, modelId: string): Model<Api> | undefined {
