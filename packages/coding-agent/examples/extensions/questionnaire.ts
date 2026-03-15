@@ -281,16 +281,15 @@ export default function questionnaire(pi: ExtensionAPI) {
 					if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && q) {
 						const opt = opts[optionIndex];
 
-						if (opt.isOther) {
-							inputMode = true;
-							inputQuestionId = q.id;
-							editor.setText("");
-							refresh();
-							return;
-						}
-
 						if (q.multiSelect) {
 							if (matchesKey(data, Key.space)) {
+								if (opt.isOther) {
+									inputMode = true;
+									inputQuestionId = q.id;
+									editor.setText("");
+									refresh();
+									return;
+								}
 								let set = selectedSets.get(q.id);
 								if (!set) {
 									set = new Set();
@@ -307,7 +306,15 @@ export default function questionnaire(pi: ExtensionAPI) {
 							if (matchesKey(data, Key.enter)) {
 								const set = selectedSets.get(q.id);
 								const customs = customEntries.get(q.id) || [];
-								if ((!set || set.size === 0) && customs.length === 0) return;
+								const hasSelections = (set && set.size > 0) || customs.length > 0;
+								if (opt.isOther && !hasSelections) {
+									inputMode = true;
+									inputQuestionId = q.id;
+									editor.setText("");
+									refresh();
+									return;
+								}
+								if (!hasSelections) return;
 								const sorted = set ? Array.from(set).sort((a, b) => a - b) : [];
 								const values = sorted.map((i) => opts[i].value).concat(customs);
 								const labels = sorted.map((i) => opts[i].label).concat(customs.map((c) => `(wrote) ${c}`));
