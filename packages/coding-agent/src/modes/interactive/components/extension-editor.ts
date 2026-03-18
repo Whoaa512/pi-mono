@@ -124,10 +124,18 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			this.tui.stop();
 
 			const [editor, ...editorArgs] = editorCmd.split(" ");
+			const startTime = Date.now();
 			const result = spawnSync(editor, [...editorArgs, tmpFile], {
 				stdio: "inherit",
 				shell: process.platform === "win32",
 			});
+			const elapsed = Date.now() - startTime;
+
+			if (result.status === 0 && elapsed < 1500) {
+				spawnSync("bash", ["-c", 'read -p "\nPress Enter when done editing..."'], {
+					stdio: "inherit",
+				});
+			}
 
 			if (result.status === 0) {
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");

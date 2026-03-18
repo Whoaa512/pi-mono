@@ -2991,18 +2991,27 @@ export class InteractiveMode {
 			// Split by space to support editor arguments (e.g., "code --wait")
 			const [editor, ...editorArgs] = editorCmd.split(" ");
 
+			const startTime = Date.now();
+
 			// Spawn editor synchronously with inherited stdio for interactive editing
 			const result = spawnSync(editor, [...editorArgs, tmpFile], {
 				stdio: "inherit",
 				shell: process.platform === "win32",
 			});
 
+			const elapsed = Date.now() - startTime;
+
+			// GUI editors (e.g. VS Code) may fork and return immediately.
+			// If the process exited in under 1500ms, prompt user to confirm when done.
+			if (result.status === 0 && elapsed < 1500) {
+				this.waitForUserConfirmation();
+			}
+
 			// On successful exit (status 0), replace editor content
 			if (result.status === 0) {
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
 				this.editor.setText(newContent);
 			}
-			// On non-zero exit, keep original text (no action needed)
 		} finally {
 			// Clean up temp file
 			try {
@@ -3016,6 +3025,12 @@ export class InteractiveMode {
 			// Force full re-render since external editor uses alternate screen
 			this.ui.requestRender(true);
 		}
+	}
+
+	private waitForUserConfirmation(): void {
+		spawnSync("bash", ["-c", 'read -p "\nPress Enter when done editing..."'], {
+			stdio: "inherit",
+		});
 	}
 
 	// =========================================================================
