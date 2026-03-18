@@ -3604,6 +3604,7 @@ export class InteractiveMode {
 			// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
 			// Node/libuv's console input read active after ui.stop() pauses stdin, racing
 			// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
+			const startTime = Date.now();
 			const status = await new Promise<number | null>((resolve) => {
 				const child = spawn(editor, [...editorArgs, tmpFile], {
 					stdio: "inherit",
@@ -3613,12 +3614,19 @@ export class InteractiveMode {
 				child.on("close", (code) => resolve(code));
 			});
 
+			const elapsed = Date.now() - startTime;
+
+			// GUI editors (e.g. VS Code) may fork and return immediately.
+			// If the process exited in under 1500ms, prompt user to confirm when done.
+			if (status === 0 && elapsed < 1500) {
+				this.waitForUserConfirmation();
+			}
+
 			// On successful exit (status 0), replace editor content
 			if (status === 0) {
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
 				this.editor.setText(newContent);
 			}
-			// On non-zero exit, keep original text (no action needed)
 		} finally {
 			// Clean up temp file
 			try {
@@ -3632,6 +3640,12 @@ export class InteractiveMode {
 			// Force full re-render since external editor uses alternate screen
 			this.ui.requestRender(true);
 		}
+	}
+
+	private waitForUserConfirmation(): void {
+		spawnSync("bash", ["-c", 'read -p "\nPress Enter when done editing..."'], {
+			stdio: "inherit",
+		});
 	}
 
 	// =========================================================================

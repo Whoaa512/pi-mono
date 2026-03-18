@@ -3,7 +3,7 @@
  * Supports Ctrl+G for external editor.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -129,6 +129,7 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
 			// Node/libuv's console input read active after tui.stop() pauses stdin, racing
 			// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
+			const startTime = Date.now();
 			const status = await new Promise<number | null>((resolve) => {
 				const child = spawn(editor, [...editorArgs, tmpFile], {
 					stdio: "inherit",
@@ -137,6 +138,15 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 				child.on("error", () => resolve(null));
 				child.on("close", (code) => resolve(code));
 			});
+			const elapsed = Date.now() - startTime;
+
+			// GUI editors (Cursor, Sublime without --wait, etc.) fork and exit immediately.
+			// If the launcher exits cleanly in <1.5s, prompt the user to confirm they're done.
+			if (status === 0 && elapsed < 1500) {
+				spawnSync("bash", ["-c", 'read -p "\nPress Enter when done editing..."'], {
+					stdio: "inherit",
+				});
+			}
 
 			if (status === 0) {
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
