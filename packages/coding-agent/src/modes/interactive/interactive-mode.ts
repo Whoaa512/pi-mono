@@ -1170,6 +1170,9 @@ export class InteractiveMode {
 	 */
 	private async initExtensions(): Promise<void> {
 		const uiContext = this.createExtensionUIContext();
+
+		this.setupAutocomplete(this.fdPath);
+
 		await this.session.bindExtensions({
 			uiContext,
 			commandContextActions: {
@@ -1254,7 +1257,6 @@ export class InteractiveMode {
 		});
 
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-		this.setupAutocomplete(this.fdPath);
 
 		const extensionRunner = this.session.extensionRunner;
 		if (!extensionRunner) {
