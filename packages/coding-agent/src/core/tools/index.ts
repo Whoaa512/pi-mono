@@ -10,6 +10,7 @@ export {
 	createBashTool,
 	createBashToolDefinition,
 	createLocalBashOperations,
+	createRtkSpawnHook,
 } from "./bash.js";
 export {
 	createEditTool,

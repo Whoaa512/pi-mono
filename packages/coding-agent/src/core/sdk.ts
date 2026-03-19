@@ -26,6 +26,7 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createRtkSpawnHook,
 	createWriteTool,
 	editTool,
 	findTool,
@@ -120,6 +121,7 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
+	createRtkSpawnHook,
 };
 
 // Helper Functions

@@ -170,6 +170,7 @@ export {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createRtkSpawnHook,
 	createWriteTool,
 	type PromptTemplate,
 	// Pre-built tools (use process.cwd())
