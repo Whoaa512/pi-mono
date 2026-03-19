@@ -185,6 +185,7 @@ export {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createRtkSpawnHook,
 	createWriteTool,
 	type PromptTemplate,
 } from "./core/sdk.js";
