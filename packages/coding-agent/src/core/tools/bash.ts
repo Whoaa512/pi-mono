@@ -1,8 +1,8 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.ts";
@@ -132,6 +132,33 @@ export interface BashSpawnContext {
 }
 
 export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
+
+let rtkAvailable: boolean | undefined;
+
+function isRtkAvailable(): boolean {
+	if (rtkAvailable !== undefined) return rtkAvailable;
+	const result = spawnSync("rtk", ["--version"], { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
+	rtkAvailable = result.status === 0;
+	return rtkAvailable;
+}
+
+export function createRtkSpawnHook(): BashSpawnHook | undefined {
+	if (!isRtkAvailable()) return undefined;
+	return (ctx) => {
+		const result = spawnSync("rtk", ["rewrite", ctx.command], {
+			encoding: "utf-8",
+			timeout: 3000,
+			stdio: "pipe",
+		});
+		if (result.status === 0 && result.stdout) {
+			const rewritten = result.stdout.trim();
+			if (rewritten && rewritten !== ctx.command) {
+				ctx.command = rewritten;
+			}
+		}
+		return ctx;
+	};
+}
 
 function resolveSpawnContext(command: string, cwd: string, spawnHook?: BashSpawnHook): BashSpawnContext {
 	const baseContext: BashSpawnContext = { command, cwd, env: { ...getShellEnv() } };

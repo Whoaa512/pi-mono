@@ -88,7 +88,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
-import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { type BashOperations, createLocalBashOperations, createRtkSpawnHook } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 
@@ -2373,6 +2373,8 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		const bashRewriter = this.settingsManager.getBashRewriter();
+		const spawnHook = bashRewriter === "rtk" ? createRtkSpawnHook() : undefined;
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -2382,7 +2384,7 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					bash: { commandPrefix: shellCommandPrefix, shellPath, spawnHook },
 				});
 
 		this._baseToolDefinitions = new Map(

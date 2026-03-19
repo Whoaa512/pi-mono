@@ -8,6 +8,7 @@ export {
 	createBashTool,
 	createBashToolDefinition,
 	createLocalBashOperations,
+	createRtkSpawnHook,
 } from "./bash.ts";
 export {
 	createEditTool,
