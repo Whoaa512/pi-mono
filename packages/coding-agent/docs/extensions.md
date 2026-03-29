@@ -1231,6 +1231,36 @@ if (pi.getFlag("--plan")) {
 }
 ```
 
+### pi.getSettings(extensionName)
+
+Read extension-specific settings from `settings.json`. Settings live under the `"extension-settings"` key, namespaced by extension name.
+
+```json
+// ~/.pi/agent/settings.json
+{
+  "extension-settings": {
+    "subagent": {
+      "maxParallelTasks": 12,
+      "maxConcurrency": 6
+    },
+    "my-extension": {
+      "apiEndpoint": "https://example.com"
+    }
+  }
+}
+```
+
+```typescript
+const settings = pi.getSettings("my-extension");
+const endpoint = typeof settings.apiEndpoint === "string"
+  ? settings.apiEndpoint
+  : "https://default.com";
+```
+
+Returns an empty object `{}` if no settings are configured for that extension. The returned value is an untyped `Record<string, unknown>`, so validate types before use.
+
+Settings are read at extension load time and respect the global/project merge behavior (project `settings.json` overrides global).
+
 ### pi.exec(command, args, options?)
 
 Execute a shell command.

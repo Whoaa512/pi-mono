@@ -1107,6 +1107,22 @@ export interface ExtensionAPI {
 	/** Get the value of a registered CLI flag. */
 	getFlag(name: string): boolean | string | undefined;
 
+	/**
+	 * Get extension-specific settings from settings.json.
+	 *
+	 * Reads from `"extension-settings".<extensionName>` in settings.json.
+	 * Returns an empty object if no settings are configured.
+	 *
+	 * @param extensionName - The extension name to look up settings for.
+	 *
+	 * @example
+	 * // In settings.json:
+	 * // { "extension-settings": { "subagent": { "maxParallelTasks": 12 } } }
+	 * const settings = pi.getSettings("subagent");
+	 * // settings = { maxParallelTasks: 12 }
+	 */
+	getSettings(extensionName: string): Record<string, unknown>;
+
 	// =========================================================================
 	// Message Rendering
 	// =========================================================================
@@ -1397,6 +1413,8 @@ export interface ExtensionRuntimeState {
 	 */
 	registerProvider: (name: string, config: ProviderConfig, extensionPath?: string) => void;
 	unregisterProvider: (name: string, extensionPath?: string) => void;
+	/** Get settings for a specific extension from settings.json "extension-settings" */
+	getExtensionSettings: (extensionName: string) => Record<string, unknown>;
 }
 
 /**

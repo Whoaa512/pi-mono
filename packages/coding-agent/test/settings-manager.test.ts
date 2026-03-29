@@ -309,4 +309,69 @@ describe("SettingsManager", () => {
 			expect(manager.getSessionDir()).toBe("./sessions");
 		});
 	});
+
+	describe("getExtensionSettings", () => {
+		it("should return settings for a configured extension", () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(
+				settingsPath,
+				JSON.stringify({
+					"extension-settings": {
+						subagent: { maxParallelTasks: 12, maxConcurrency: 6 },
+					},
+				}),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			const settings = manager.getExtensionSettings("subagent");
+
+			expect(settings).toEqual({ maxParallelTasks: 12, maxConcurrency: 6 });
+		});
+
+		it("should return empty object for unconfigured extension", () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExtensionSettings("nonexistent")).toEqual({});
+		});
+
+		it("should return empty object when extension-settings key is absent", () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(settingsPath, JSON.stringify({}));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExtensionSettings("subagent")).toEqual({});
+		});
+
+		it("should merge project extension settings over global", () => {
+			const globalPath = join(agentDir, "settings.json");
+			writeFileSync(
+				globalPath,
+				JSON.stringify({
+					"extension-settings": {
+						subagent: { maxParallelTasks: 8, maxConcurrency: 4 },
+						other: { foo: "bar" },
+					},
+				}),
+			);
+
+			const projectPath = join(projectDir, ".pi", "settings.json");
+			writeFileSync(
+				projectPath,
+				JSON.stringify({
+					"extension-settings": {
+						subagent: { maxParallelTasks: 16 },
+					},
+				}),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			// Project replaces the entire per-extension object (shallow merge at extension-settings level)
+			expect(manager.getExtensionSettings("subagent")).toEqual({ maxParallelTasks: 16 });
+			// Extensions not overridden in project keep global values
+			expect(manager.getExtensionSettings("other")).toEqual({ foo: "bar" });
+		});
+	});
 });

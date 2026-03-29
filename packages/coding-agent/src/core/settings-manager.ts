@@ -96,6 +96,7 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	"extension-settings"?: Record<string, Record<string, unknown>>;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -965,5 +966,9 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getExtensionSettings(extensionName: string): Record<string, unknown> {
+		return this.settings["extension-settings"]?.[extensionName] ?? {};
 	}
 }
