@@ -131,7 +131,9 @@ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
  * Create a runtime with throwing stubs for action methods.
  * Runner.bindCore() replaces these with real implementations.
  */
-export function createExtensionRuntime(): ExtensionRuntime {
+export function createExtensionRuntime(options?: {
+	getExtensionSettings?: (extensionName: string) => Record<string, unknown>;
+}): ExtensionRuntime {
 	const notInitialized = () => {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
 	};
@@ -174,6 +176,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		unregisterProvider: (name) => {
 			runtime.pendingProviderRegistrations = runtime.pendingProviderRegistrations.filter((r) => r.name !== name);
 		},
+		getExtensionSettings: options?.getExtensionSettings ?? (() => ({})),
 	};
 
 	return runtime;
@@ -249,6 +252,10 @@ function createExtensionAPI(
 			runtime.assertActive();
 			if (!extension.flags.has(name)) return undefined;
 			return runtime.flagValues.get(name);
+		},
+
+		getSettings(extensionName: string): Record<string, unknown> {
+			return runtime.getExtensionSettings(extensionName);
 		},
 
 		// Action methods - delegate to shared runtime
@@ -419,11 +426,18 @@ export async function loadExtensionFromFactory(
 /**
  * Load extensions from paths.
  */
-export async function loadExtensions(paths: string[], cwd: string, eventBus?: EventBus): Promise<LoadExtensionsResult> {
+export async function loadExtensions(
+	paths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	options?: { getExtensionSettings?: (extensionName: string) => Record<string, unknown> },
+): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
 	const resolvedEventBus = eventBus ?? createEventBus();
-	const runtime = createExtensionRuntime();
+	const runtime = createExtensionRuntime({
+		getExtensionSettings: options?.getExtensionSettings,
+	});
 
 	for (const extPath of paths) {
 		const { extension, error } = await loadExtension(extPath, cwd, resolvedEventBus, runtime);
@@ -562,6 +576,7 @@ export async function discoverAndLoadExtensions(
 	cwd: string,
 	agentDir: string = getAgentDir(),
 	eventBus?: EventBus,
+	options?: { getExtensionSettings?: (extensionName: string) => Record<string, unknown> },
 ): Promise<LoadExtensionsResult> {
 	const allPaths: string[] = [];
 	const seen = new Set<string>();
@@ -602,5 +617,5 @@ export async function discoverAndLoadExtensions(
 		addPaths([resolved]);
 	}
 
-	return loadExtensions(allPaths, cwd, eventBus);
+	return loadExtensions(allPaths, cwd, eventBus, options);
 }

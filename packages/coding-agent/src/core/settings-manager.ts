@@ -111,6 +111,7 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	"extension-settings"?: Record<string, Record<string, unknown>>;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -1074,5 +1075,9 @@ export class SettingsManager {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
 		this.save();
+	}
+
+	getExtensionSettings(extensionName: string): Record<string, unknown> {
+		return this.settings["extension-settings"]?.[extensionName] ?? {};
 	}
 }

@@ -52,6 +52,26 @@ for f in packages/coding-agent/examples/extensions/subagent/prompts/*.md; do
 done
 ```
 
+## Configuration
+
+Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-settings"`:
+
+```json
+{
+  "extension-settings": {
+    "subagent": {
+      "maxParallelTasks": 12,
+      "maxConcurrency": 6
+    }
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `maxParallelTasks` | 8 | Maximum tasks in a single parallel invocation |
+| `maxConcurrency` | 4 | Maximum agents running simultaneously |
+
 ## Security Model
 
 This tool executes a separate `pi` subprocess with a delegated system prompt and tool/model configuration.
@@ -169,4 +189,4 @@ Project agents override user agents with the same name when `agentScope: "both"`
 
 - Output truncated to last 10 items in collapsed view (expand to see all)
 - Agents discovered fresh on each invocation (allows editing mid-session)
-- Parallel mode limited to 8 tasks, 4 concurrent
+- Parallel mode limited to 8 tasks, 4 concurrent (configurable via settings)
