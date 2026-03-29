@@ -12,7 +12,6 @@ import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } 
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
-	EditorAction,
 	EditorComponent,
 	EditorTheme,
 	Keybinding,

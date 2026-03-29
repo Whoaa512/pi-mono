@@ -28,6 +28,17 @@ const DEFAULT_MAX_PARALLEL_TASKS = 8;
 const DEFAULT_MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 
+const MODEL_ALIASES: Record<string, string> = {
+	opus: "anthropic/claude-opus-4-6",
+	sonnet: "anthropic/claude-sonnet-4-5",
+	haiku: "anthropic/claude-haiku-4-5",
+};
+
+function resolveModelAlias(model: string | undefined): string | undefined {
+	if (!model) return model;
+	return MODEL_ALIASES[model.toLowerCase()] ?? model;
+}
+
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -263,7 +274,7 @@ async function runSingleAgent(
 	}
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	const effectiveModel = modelOverride || agent.model;
+	const effectiveModel = resolveModelAlias(modelOverride || agent.model);
 	if (effectiveModel) args.push("--model", effectiveModel);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
