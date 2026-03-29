@@ -24,8 +24,8 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
 
-const MAX_PARALLEL_TASKS = 8;
-const MAX_CONCURRENCY = 4;
+const DEFAULT_MAX_PARALLEL_TASKS = 8;
+const DEFAULT_MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
 
@@ -457,6 +457,12 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+	const settings = pi.getSettings("subagent");
+	const MAX_PARALLEL_TASKS =
+		typeof settings.maxParallelTasks === "number" ? settings.maxParallelTasks : DEFAULT_MAX_PARALLEL_TASKS;
+	const MAX_CONCURRENCY =
+		typeof settings.maxConcurrency === "number" ? settings.maxConcurrency : DEFAULT_MAX_CONCURRENCY;
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
