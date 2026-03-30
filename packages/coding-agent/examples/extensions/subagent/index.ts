@@ -27,6 +27,8 @@ import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 const DEFAULT_MAX_PARALLEL_TASKS = 8;
 const DEFAULT_MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
+const PROCESS_EXIT_GRACE_MS = 30_000;
+const MAX_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
 
 const MODEL_ALIASES: Record<string, string> = {
 	opus: "anthropic/claude-opus-4-6",
@@ -349,6 +351,10 @@ async function runSingleAgent(
 						if (!currentResult.model && msg.model) currentResult.model = msg.model;
 						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
 						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+
+						const isTerminal =
+							msg.stopReason === "stop" || msg.stopReason === "error" || msg.stopReason === "aborted";
+						if (isTerminal) startGraceTimer();
 					}
 					emitUpdate();
 				}
@@ -359,6 +365,48 @@ async function runSingleAgent(
 				}
 			};
 
+			let resolved = false;
+			let graceTimer: ReturnType<typeof setTimeout> | null = null;
+			let maxTimer: ReturnType<typeof setTimeout> | null = null;
+
+			const safeResolve = (code: number) => {
+				if (resolved) return;
+				resolved = true;
+				if (graceTimer) clearTimeout(graceTimer);
+				if (maxTimer) clearTimeout(maxTimer);
+				if (buffer.trim()) processLine(buffer);
+				resolve(code);
+			};
+
+			const killProc = () => {
+				try {
+					proc.kill("SIGTERM");
+				} catch {}
+				setTimeout(() => {
+					try {
+						if (!proc.killed) proc.kill("SIGKILL");
+					} catch {}
+				}, 5000);
+			};
+
+			const startGraceTimer = () => {
+				if (resolved || graceTimer) return;
+				graceTimer = setTimeout(() => {
+					if (!resolved) {
+						killProc();
+						safeResolve(0);
+					}
+				}, PROCESS_EXIT_GRACE_MS);
+			};
+
+			maxTimer = setTimeout(() => {
+				if (!resolved) {
+					killProc();
+					currentResult.errorMessage = "Subagent exceeded maximum timeout";
+					safeResolve(1);
+				}
+			}, MAX_AGENT_TIMEOUT_MS);
+
 			proc.stdout.on("data", (data) => {
 				buffer += data.toString();
 				const lines = buffer.split("\n");
@@ -366,29 +414,37 @@ async function runSingleAgent(
 				for (const line of lines) processLine(line);
 			});
 
+			proc.stdout.on("end", () => {
+				startGraceTimer();
+			});
+
+			proc.stdout.on("error", () => {});
+
 			proc.stderr.on("data", (data) => {
 				currentResult.stderr += data.toString();
 			});
 
+			proc.stderr.on("end", () => {
+				startGraceTimer();
+			});
+
+			proc.stderr.on("error", () => {});
+
 			proc.on("close", (code) => {
-				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				safeResolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
-				resolve(1);
+				safeResolve(1);
 			});
 
 			if (signal) {
-				const killProc = () => {
+				const abortHandler = () => {
 					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
+					killProc();
 				};
-				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
+				if (signal.aborted) abortHandler();
+				else signal.addEventListener("abort", abortHandler, { once: true });
 			}
 		});
 
