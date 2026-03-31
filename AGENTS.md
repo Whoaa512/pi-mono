@@ -30,6 +30,10 @@ read README.md, then ask which module(s) to work on. Based on the answer, read t
 - When writing tests, run them, identify issues in either the test or implementation, and iterate until fixed.
 - NEVER commit unless user asks
 
+## CJ's Extension Tests
+- After rebasing on `upstream/main`, run: `npx vitest --run cj/tests/`
+- These validate CJ's personal extensions (in `~/code/dotfiles/ai/pi/agent/extensions/`) against the core repo APIs
+
 ## GitHub Issues
 When reading issues:
 - Always read all comments on the issue
