@@ -34,6 +34,10 @@
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
 - Never commit unless the user asks.
 
+## CJ's Extension Tests
+- After rebasing on `upstream/main`, run: `npx vitest --run cj/tests/`
+- These validate CJ's personal extensions (in `~/code/dotfiles/ai/pi/agent/extensions/`) against the core repo APIs
+
 ## Dependency and Install Security
 
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions.
