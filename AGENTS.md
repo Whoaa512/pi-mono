@@ -31,6 +31,10 @@
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` and name them `<issue-number>-<short-slug>.test.ts`.
 - NEVER commit unless user asks
 
+## CJ's Extension Tests
+- After rebasing on `upstream/main`, run: `npx vitest --run cj/tests/`
+- These validate CJ's personal extensions (in `~/code/dotfiles/ai/pi/agent/extensions/`) against the core repo APIs
+
 ## Contribution Gate
 
 - New issues from new contributors are auto-closed by `.github/workflows/issue-gate.yml`
