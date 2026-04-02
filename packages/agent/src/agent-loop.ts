@@ -197,8 +197,8 @@ async function runLoop(
 				return;
 			}
 
-			// Check for tool calls
-			const toolCalls = message.content.filter((c) => c.type === "toolCall");
+			// Check for tool calls (skip malformed ones with empty id/name)
+			const toolCalls = message.content.filter((c) => c.type === "toolCall" && c.id && c.name);
 			hasMoreToolCalls = toolCalls.length > 0;
 
 			const toolResults: ToolResultMessage[] = [];
@@ -340,7 +340,9 @@ async function executeToolCalls(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<ToolResultMessage[]> {
-	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
+	const toolCalls = assistantMessage.content.filter(
+		(c): c is AgentToolCall => c.type === "toolCall" && !!c.id && !!c.name,
+	);
 	if (config.toolExecution === "sequential") {
 		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
 	}

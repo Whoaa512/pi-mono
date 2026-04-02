@@ -66,6 +66,7 @@ export function transformMessages<TApi extends Api>(
 
 				if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
+					if (!toolCall.id || !toolCall.name) return [];
 					let normalizedToolCall: ToolCall = toolCall;
 
 					if (!isSameModel && toolCall.thoughtSignature) {
