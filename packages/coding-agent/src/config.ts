@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
@@ -535,7 +536,18 @@ export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);
 }
 
-/** Get path to cross-session prompt history file */
-export function getPromptHistoryPath(): string {
+/** Directory for per-cwd prompt history files */
+export function getPromptHistoryDir(): string {
+	return join(getAgentDir(), "prompt-history");
+}
+
+/** Get path to cross-session prompt history file for a given cwd */
+export function getPromptHistoryPath(cwd: string): string {
+	const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+	return join(getPromptHistoryDir(), `${hash}.json`);
+}
+
+/** Legacy global prompt history file (pre per-directory migration) */
+export function getLegacyPromptHistoryPath(): string {
 	return join(getAgentDir(), "prompt-history.json");
 }

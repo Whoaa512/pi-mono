@@ -4,24 +4,35 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let tmpDir: string;
-let historyFile: string;
+let historyDir: string;
+let legacyFile: string;
+const TEST_CWD = "/test/project";
 
 vi.mock("../src/config.js", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/config.js")>();
 	return {
 		...original,
-		getPromptHistoryPath: () => historyFile,
+		getPromptHistoryPath: (cwd: string) => {
+			const { createHash } = require("node:crypto");
+			const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+			return path.join(historyDir, `${hash}.json`);
+		},
+		getPromptHistoryDir: () => historyDir,
+		getLegacyPromptHistoryPath: () => legacyFile,
 	};
 });
 
 describe("prompt-history", () => {
 	beforeEach(() => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-prompt-history-"));
-		historyFile = path.join(tmpDir, "prompt-history.json");
+		historyDir = path.join(tmpDir, "prompt-history");
+		legacyFile = path.join(tmpDir, "prompt-history.json");
+		vi.spyOn(process, "cwd").mockReturnValue(TEST_CWD);
 	});
 
 	afterEach(() => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+		vi.restoreAllMocks();
 	});
 
 	it("returns empty array when no file exists", async () => {
@@ -65,14 +76,18 @@ describe("prompt-history", () => {
 	});
 
 	it("handles corrupted file gracefully", async () => {
-		const { loadPromptHistory } = await import("../src/core/prompt-history.js");
-		fs.writeFileSync(historyFile, "not json", "utf-8");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		savePromptToHistory("seed");
+		const { getPromptHistoryPath } = await import("../src/config.js");
+		fs.writeFileSync(getPromptHistoryPath(TEST_CWD), "not json", "utf-8");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
 	it("handles file with wrong shape gracefully", async () => {
-		const { loadPromptHistory } = await import("../src/core/prompt-history.js");
-		fs.writeFileSync(historyFile, JSON.stringify({ prompts: "not-an-array" }), "utf-8");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		savePromptToHistory("seed");
+		const { getPromptHistoryPath } = await import("../src/config.js");
+		fs.writeFileSync(getPromptHistoryPath(TEST_CWD), JSON.stringify({ prompts: "not-an-array" }), "utf-8");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
@@ -84,5 +99,38 @@ describe("prompt-history", () => {
 		const history = loadPromptHistory();
 		expect(history.length).toBe(500);
 		expect(history[0]).toBe("prompt-509");
+	});
+
+	it("isolates history per directory", async () => {
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+
+		savePromptToHistory("from-project-a");
+
+		vi.spyOn(process, "cwd").mockReturnValue("/other/project");
+		savePromptToHistory("from-project-b");
+
+		const otherHistory = loadPromptHistory();
+		expect(otherHistory).toEqual(["from-project-b"]);
+
+		vi.spyOn(process, "cwd").mockReturnValue(TEST_CWD);
+		const originalHistory = loadPromptHistory();
+		expect(originalHistory).toEqual(["from-project-a"]);
+	});
+
+	it("migrates from legacy global file when per-dir file missing", async () => {
+		fs.writeFileSync(legacyFile, JSON.stringify({ prompts: ["legacy-prompt"] }), "utf-8");
+
+		const { loadPromptHistory } = await import("../src/core/prompt-history.js");
+		expect(loadPromptHistory()).toEqual(["legacy-prompt"]);
+	});
+
+	it("per-dir file takes precedence once written", async () => {
+		fs.writeFileSync(legacyFile, JSON.stringify({ prompts: ["legacy-prompt"] }), "utf-8");
+
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		savePromptToHistory("new-prompt");
+
+		expect(loadPromptHistory()[0]).toBe("new-prompt");
+		expect(loadPromptHistory()).toEqual(["new-prompt", "legacy-prompt"]);
 	});
 });
