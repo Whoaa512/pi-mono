@@ -296,6 +296,7 @@ async function streamAssistantResponse(
 	};
 
 	const streamFunction = streamFn || streamSimple;
+	const responseStartedAt = Date.now();
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
@@ -342,6 +343,7 @@ async function streamAssistantResponse(
 			case "done":
 			case "error": {
 				const finalMessage = await response.result();
+				finalMessage.durationMs = Math.max(0, Date.now() - responseStartedAt);
 				if (addedPartial) {
 					context.messages[context.messages.length - 1] = finalMessage;
 				} else {
@@ -357,6 +359,7 @@ async function streamAssistantResponse(
 	}
 
 	const finalMessage = await response.result();
+	finalMessage.durationMs = Math.max(0, Date.now() - responseStartedAt);
 	if (addedPartial) {
 		context.messages[context.messages.length - 1] = finalMessage;
 	} else {

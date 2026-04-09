@@ -1,10 +1,40 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
+
+function formatDuration(ms: number): string {
+	const totalSeconds = Math.max(0, Math.round(ms / 1000));
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	if (minutes > 0) return `${minutes}m ${seconds}s`;
+	return `${seconds}s`;
+}
+
+function formatTokens(count: number): string {
+	if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+	if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+	return count.toString();
+}
+
+function formatSpeed(usage: Usage, durationMs: number): string | undefined {
+	if (usage.output <= 0 || durationMs <= 0) return undefined;
+	const tokensPerSecond = usage.output / (durationMs / 1000);
+	return `${tokensPerSecond.toFixed(tokensPerSecond >= 10 ? 0 : 1)} tok/s`;
+}
+
+function formatStats(message: AssistantMessage): string | undefined {
+	if (message.durationMs === undefined) return undefined;
+
+	const parts = [formatDuration(message.durationMs)];
+	if (message.usage.output > 0) parts.push(`${formatTokens(message.usage.output)} out`);
+	const speed = formatSpeed(message.usage, message.durationMs);
+	if (speed) parts.push(speed);
+	return parts.join(" · ");
+}
 
 /**
  * Component that renders a complete assistant message
@@ -119,6 +149,11 @@ export class AssistantMessageComponent extends Container {
 					}
 				}
 			}
+		}
+
+		const stats = formatStats(message);
+		if (stats) {
+			this.contentContainer.addChild(new Text(theme.fg("dim", stats), 1, 0));
 		}
 
 		// Check if aborted - show after partial content
