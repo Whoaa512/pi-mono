@@ -61,7 +61,8 @@ Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-se
   "extension-settings": {
     "subagent": {
       "maxParallelTasks": 12,
-      "maxConcurrency": 6
+      "maxConcurrency": 6,
+      "defaultAgentScope": "both"
     }
   }
 }
@@ -71,6 +72,7 @@ Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-se
 |---------|---------|-------------|
 | `maxParallelTasks` | 8 | Maximum tasks in a single parallel invocation |
 | `maxConcurrency` | 4 | Maximum agents running simultaneously |
+| `defaultAgentScope` | `"user"` | Default agent scope when `agentScope` is omitted. Use `"both"` to include project-local agents by default. |
 
 ## Security Model
 
