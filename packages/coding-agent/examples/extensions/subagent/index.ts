@@ -505,8 +505,14 @@ const ChainItem = Type.Object({
 	model: Type.Optional(Type.String({ description: "Override the agent's default model" })),
 });
 
-const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
-	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
+const AGENT_SCOPES = ["user", "project", "both"] as const;
+
+function isAgentScope(value: unknown): value is AgentScope {
+	return typeof value === "string" && AGENT_SCOPES.includes(value as AgentScope);
+}
+
+const AgentScopeSchema = StringEnum(AGENT_SCOPES, {
+	description: 'Which agent directories to use. Defaults to the subagent defaultAgentScope setting, or "user".',
 	default: "user",
 });
 
@@ -529,6 +535,9 @@ export default function (pi: ExtensionAPI) {
 		typeof settings.maxParallelTasks === "number" ? settings.maxParallelTasks : DEFAULT_MAX_PARALLEL_TASKS;
 	const MAX_CONCURRENCY =
 		typeof settings.maxConcurrency === "number" ? settings.maxConcurrency : DEFAULT_MAX_CONCURRENCY;
+	const DEFAULT_AGENT_SCOPE: AgentScope = isAgentScope(settings.defaultAgentScope)
+		? settings.defaultAgentScope
+		: "user";
 
 	pi.registerTool({
 		name: "subagent",
@@ -536,13 +545,13 @@ export default function (pi: ExtensionAPI) {
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			'Default agent scope is "user" (from ~/.pi/agent/agents).',
+			'Default agent scope comes from extension-settings.subagent.defaultAgentScope, falling back to "user".',
 			'To enable project-local agents in .pi/agents or .claude/agents, set agentScope: "both" (or "project").',
 		].join(" "),
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const agentScope: AgentScope = params.agentScope ?? "user";
+			const agentScope: AgentScope = params.agentScope ?? DEFAULT_AGENT_SCOPE;
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
@@ -773,7 +782,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? "user";
+			const scope: AgentScope = args.agentScope ?? DEFAULT_AGENT_SCOPE;
 			if (args.chain && args.chain.length > 0) {
 				let text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +
