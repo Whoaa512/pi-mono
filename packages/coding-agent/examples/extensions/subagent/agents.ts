@@ -23,6 +23,29 @@ export interface AgentDiscoveryResult {
 	projectAgentsDir: string | null;
 }
 
+const CLAUDE_TOOL_ALIASES: Record<string, string | undefined> = {
+	bash: "bash",
+	edit: "edit",
+	glob: "find",
+	grep: "grep",
+	ls: "ls",
+	multiedit: "edit",
+	read: "read",
+	write: "write",
+};
+
+function normalizeToolName(tool: string, dir: string): string | undefined {
+	const normalized = tool.trim().toLowerCase();
+	if (!dir.includes(`${path.sep}.claude${path.sep}agents`)) return normalized;
+	return CLAUDE_TOOL_ALIASES[normalized];
+}
+
+function normalizeModel(model: string | undefined): string | undefined {
+	if (!model) return undefined;
+	if (model.toLowerCase() === "inherit") return undefined;
+	return model;
+}
+
 function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
@@ -57,14 +80,14 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 
 		const tools = frontmatter.tools
 			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
+			.map((t: string) => normalizeToolName(t, dir))
+			.filter((tool): tool is string => Boolean(tool));
 
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
-			model: frontmatter.model,
+			model: normalizeModel(frontmatter.model),
 			systemPrompt: body,
 			source,
 			filePath,
@@ -82,24 +105,26 @@ function isDirectory(p: string): boolean {
 	}
 }
 
-function findNearestProjectAgentsDir(cwd: string): string | null {
+function findNearestProjectAgentsDirs(cwd: string): string[] {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".pi", "agents");
-		if (isDirectory(candidate)) return candidate;
+		const candidates = [path.join(currentDir, ".claude", "agents"), path.join(currentDir, ".pi", "agents")];
+		const dirs = candidates.filter(isDirectory);
+		if (dirs.length > 0) return dirs;
 
 		const parentDir = path.dirname(currentDir);
-		if (parentDir === currentDir) return null;
+		if (parentDir === currentDir) return [];
 		currentDir = parentDir;
 	}
 }
 
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 	const userDir = path.join(getAgentDir(), "agents");
-	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
+	const projectAgentsDirs = findNearestProjectAgentsDirs(cwd);
+	const projectAgentsDir = projectAgentsDirs.length > 0 ? projectAgentsDirs.join(", ") : null;
 
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	const projectAgents = scope === "user" ? [] : projectAgentsDirs.flatMap((dir) => loadAgentsFromDir(dir, "project"));
 
 	const agentMap = new Map<string, AgentConfig>();
 

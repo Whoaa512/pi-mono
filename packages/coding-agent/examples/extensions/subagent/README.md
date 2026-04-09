@@ -76,7 +76,7 @@ Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-se
 
 This tool executes a separate `pi` subprocess with a delegated system prompt and tool/model configuration.
 
-**Project-local agents** (`.pi/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
+**Project-local agents** (`.pi/agents/*.md` or `.claude/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
 
 **Default behavior:** Only loads **user-level agents** from `~/.pi/agent/agents`.
 
@@ -158,8 +158,9 @@ System prompt for the agent goes here.
 **Locations:**
 - `~/.pi/agent/agents/*.md` - User-level (always loaded)
 - `.pi/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`)
+- `.claude/agents/*.md` - Claude Code-compatible project agents (only with `agentScope: "project"` or `"both"`)
 
-Project agents override user agents with the same name when `agentScope: "both"`.
+Project agents override user agents with the same name when `agentScope: "both"`. `.pi/agents` overrides `.claude/agents` when both define the same agent name in the same project.
 
 ## Sample Agents
 
