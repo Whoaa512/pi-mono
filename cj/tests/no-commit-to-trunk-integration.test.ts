@@ -86,7 +86,9 @@ describe("no-commit-to-trunk extension integration", () => {
 			extensionFactories: [],
 		});
 
-		(harness.session as any).cwd = gitDir;
+		(harness.session as any)._cwd = gitDir;
+		const runner = (harness.session as any)._extensionRunner;
+		if (runner) runner.cwd = gitDir;
 		return harness;
 	}
 
@@ -164,7 +166,9 @@ describe("no-commit-to-trunk extension integration", () => {
 			extensionFactories: [],
 		});
 
-		(harness.session as any).cwd = gitDir;
+		(harness.session as any)._cwd = gitDir;
+		const featureRunner = (harness.session as any)._extensionRunner;
+		if (featureRunner) featureRunner.cwd = gitDir;
 
 		await harness.session.prompt("commit");
 
