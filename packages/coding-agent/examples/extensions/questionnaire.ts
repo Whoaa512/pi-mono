@@ -5,6 +5,7 @@
  * Multiple questions: tab bar navigation between questions
  */
 
+import { connect } from "node:net";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	Editor,
@@ -16,6 +17,24 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
+
+function sendSupacodeFlag(flag: "0" | "1" | "2"): void {
+	const socketPath = process.env.SUPACODE_SOCKET_PATH;
+	const worktreeId = process.env.SUPACODE_WORKTREE_ID;
+	const tabId = process.env.SUPACODE_TAB_ID;
+	const surfaceId = process.env.SUPACODE_SURFACE_ID;
+	if (!socketPath || !worktreeId || !tabId || !surfaceId) return;
+
+	const message = `${worktreeId} ${tabId} ${surfaceId} ${flag}\n`;
+	try {
+		const client = connect(socketPath, () => {
+			client.end(message);
+		});
+		client.on("error", () => {});
+	} catch {
+		// Not in Supacode or socket unavailable — ignore
+	}
+}
 
 // Types
 interface QuestionOption {
@@ -117,386 +136,394 @@ export default function questionnaire(pi: ExtensionAPI) {
 			const isMulti = questions.length > 1;
 			const totalTabs = questions.length + 1; // questions + Submit
 
-			const result = await ctx.ui.custom<QuestionnaireResult>((tui, theme, _kb, done) => {
-				// State
-				let currentTab = 0;
-				let optionIndex = 0;
-				let inputMode = false;
-				let inputQuestionId: string | null = null;
-				let cachedLines: string[] | undefined;
-				const answers = new Map<string, Answer>();
-				const selectedSets = new Map<string, Set<number>>();
-				const customEntries = new Map<string, string[]>();
+			sendSupacodeFlag("2");
+			let result: QuestionnaireResult;
+			try {
+				result = await ctx.ui.custom<QuestionnaireResult>((tui, theme, _kb, done) => {
+					// State
+					let currentTab = 0;
+					let optionIndex = 0;
+					let inputMode = false;
+					let inputQuestionId: string | null = null;
+					let cachedLines: string[] | undefined;
+					const answers = new Map<string, Answer>();
+					const selectedSets = new Map<string, Set<number>>();
+					const customEntries = new Map<string, string[]>();
 
-				// Editor for "Type something" option
-				const editorTheme: EditorTheme = {
-					borderColor: (s) => theme.fg("accent", s),
-					selectList: {
-						selectedPrefix: (t) => theme.fg("accent", t),
-						selectedText: (t) => theme.fg("accent", t),
-						description: (t) => theme.fg("muted", t),
-						scrollInfo: (t) => theme.fg("dim", t),
-						noMatch: (t) => theme.fg("warning", t),
-					},
-				};
-				const editor = new Editor(tui, editorTheme);
+					// Editor for "Type something" option
+					const editorTheme: EditorTheme = {
+						borderColor: (s) => theme.fg("accent", s),
+						selectList: {
+							selectedPrefix: (t) => theme.fg("accent", t),
+							selectedText: (t) => theme.fg("accent", t),
+							description: (t) => theme.fg("muted", t),
+							scrollInfo: (t) => theme.fg("dim", t),
+							noMatch: (t) => theme.fg("warning", t),
+						},
+					};
+					const editor = new Editor(tui, editorTheme);
 
-				// Helpers
-				function refresh() {
-					cachedLines = undefined;
-					tui.requestRender();
-				}
-
-				function submit(cancelled: boolean) {
-					done({ questions, answers: Array.from(answers.values()), cancelled });
-				}
-
-				function currentQuestion(): Question | undefined {
-					return questions[currentTab];
-				}
-
-				function currentOptions(): RenderOption[] {
-					const q = currentQuestion();
-					if (!q) return [];
-					const opts: RenderOption[] = [...q.options];
-					if (q.allowOther) {
-						opts.push({ value: "__other__", label: "Type something.", isOther: true });
+					// Helpers
+					function refresh() {
+						cachedLines = undefined;
+						tui.requestRender();
 					}
-					return opts;
-				}
 
-				function allAnswered(): boolean {
-					return questions.every((q) => answers.has(q.id));
-				}
-
-				function advanceAfterAnswer() {
-					if (!isMulti) {
-						submit(false);
-						return;
+					function submit(cancelled: boolean) {
+						done({ questions, answers: Array.from(answers.values()), cancelled });
 					}
-					if (currentTab < questions.length - 1) {
-						currentTab++;
-					} else {
-						currentTab = questions.length; // Submit tab
+
+					function currentQuestion(): Question | undefined {
+						return questions[currentTab];
 					}
-					optionIndex = 0;
-					refresh();
-				}
 
-				function saveAnswer(
-					questionId: string,
-					value: string,
-					label: string,
-					wasCustom: boolean,
-					index?: number,
-					values?: string[],
-					labels?: string[],
-					indices?: number[],
-				) {
-					answers.set(questionId, { id: questionId, value, label, wasCustom, index, values, labels, indices });
-				}
-
-				// Editor submit callback
-				editor.onSubmit = (value) => {
-					if (!inputQuestionId) return;
-					const trimmed = value.trim() || "(no response)";
-					const q = questions.find((q) => q.id === inputQuestionId);
-					inputMode = false;
-					editor.setText("");
-
-					if (q?.multiSelect) {
-						let entries = customEntries.get(inputQuestionId);
-						if (!entries) {
-							entries = [];
-							customEntries.set(inputQuestionId, entries);
+					function currentOptions(): RenderOption[] {
+						const q = currentQuestion();
+						if (!q) return [];
+						const opts: RenderOption[] = [...q.options];
+						if (q.allowOther) {
+							opts.push({ value: "__other__", label: "Type something.", isOther: true });
 						}
-						entries.push(trimmed);
-						inputQuestionId = null;
-						refresh();
-						return;
+						return opts;
 					}
 
-					saveAnswer(inputQuestionId, trimmed, trimmed, true);
-					inputQuestionId = null;
-					advanceAfterAnswer();
-				};
-
-				function handleInput(data: string) {
-					// Input mode: route to editor
-					if (inputMode) {
-						if (matchesKey(data, Key.escape)) {
-							inputMode = false;
-							inputQuestionId = null;
-							editor.setText("");
-							refresh();
-							return;
-						}
-						editor.handleInput(data);
-						refresh();
-						return;
+					function allAnswered(): boolean {
+						return questions.every((q) => answers.has(q.id));
 					}
 
-					const q = currentQuestion();
-					const opts = currentOptions();
-
-					// Tab navigation (multi-question only)
-					if (isMulti) {
-						if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
-							currentTab = (currentTab + 1) % totalTabs;
-							optionIndex = 0;
-							refresh();
-							return;
-						}
-						if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
-							currentTab = (currentTab - 1 + totalTabs) % totalTabs;
-							optionIndex = 0;
-							refresh();
-							return;
-						}
-					}
-
-					// Submit tab
-					if (currentTab === questions.length) {
-						if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && allAnswered()) {
+					function advanceAfterAnswer() {
+						if (!isMulti) {
 							submit(false);
-						} else if (matchesKey(data, Key.escape)) {
-							submit(true);
+							return;
 						}
-						return;
-					}
-
-					// Option navigation
-					if (matchesKey(data, Key.up)) {
-						optionIndex = Math.max(0, optionIndex - 1);
+						if (currentTab < questions.length - 1) {
+							currentTab++;
+						} else {
+							currentTab = questions.length; // Submit tab
+						}
+						optionIndex = 0;
 						refresh();
-						return;
-					}
-					if (matchesKey(data, Key.down)) {
-						optionIndex = Math.min(opts.length - 1, optionIndex + 1);
-						refresh();
-						return;
 					}
 
-					// Select option
-					if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && q) {
-						const opt = opts[optionIndex];
+					function saveAnswer(
+						questionId: string,
+						value: string,
+						label: string,
+						wasCustom: boolean,
+						index?: number,
+						values?: string[],
+						labels?: string[],
+						indices?: number[],
+					) {
+						answers.set(questionId, { id: questionId, value, label, wasCustom, index, values, labels, indices });
+					}
 
-						if (q.multiSelect) {
-							if (matchesKey(data, Key.space)) {
-								if (opt.isOther) {
-									inputMode = true;
-									inputQuestionId = q.id;
-									editor.setText("");
-									refresh();
-									return;
-								}
-								let set = selectedSets.get(q.id);
-								if (!set) {
-									set = new Set();
-									selectedSets.set(q.id, set);
-								}
-								if (set.has(optionIndex)) {
-									set.delete(optionIndex);
-								} else {
-									set.add(optionIndex);
-								}
+					// Editor submit callback
+					editor.onSubmit = (value) => {
+						if (!inputQuestionId) return;
+						const trimmed = value.trim() || "(no response)";
+						const q = questions.find((q) => q.id === inputQuestionId);
+						inputMode = false;
+						editor.setText("");
+
+						if (q?.multiSelect) {
+							let entries = customEntries.get(inputQuestionId);
+							if (!entries) {
+								entries = [];
+								customEntries.set(inputQuestionId, entries);
+							}
+							entries.push(trimmed);
+							inputQuestionId = null;
+							refresh();
+							return;
+						}
+
+						saveAnswer(inputQuestionId, trimmed, trimmed, true);
+						inputQuestionId = null;
+						advanceAfterAnswer();
+					};
+
+					function handleInput(data: string) {
+						// Input mode: route to editor
+						if (inputMode) {
+							if (matchesKey(data, Key.escape)) {
+								inputMode = false;
+								inputQuestionId = null;
+								editor.setText("");
 								refresh();
 								return;
 							}
-							if (matchesKey(data, Key.enter)) {
-								const set = selectedSets.get(q.id);
-								const customs = customEntries.get(q.id) || [];
-								const hasSelections = (set && set.size > 0) || customs.length > 0;
-								if (opt.isOther && !hasSelections) {
-									inputMode = true;
-									inputQuestionId = q.id;
-									editor.setText("");
-									refresh();
-									return;
-								}
-								if (!hasSelections) return;
-								const sorted = set ? Array.from(set).sort((a, b) => a - b) : [];
-								const values = sorted.map((i) => opts[i].value).concat(customs);
-								const labels = sorted.map((i) => opts[i].label).concat(customs.map((c) => `(wrote) ${c}`));
-								const indices = sorted.map((i) => i + 1);
-								const hasCustom = customs.length > 0;
-								saveAnswer(
-									q.id,
-									values.join(", "),
-									labels.join(", "),
-									hasCustom,
-									undefined,
-									values,
-									labels,
-									indices,
-								);
-								advanceAfterAnswer();
+							editor.handleInput(data);
+							refresh();
+							return;
+						}
+
+						const q = currentQuestion();
+						const opts = currentOptions();
+
+						// Tab navigation (multi-question only)
+						if (isMulti) {
+							if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
+								currentTab = (currentTab + 1) % totalTabs;
+								optionIndex = 0;
+								refresh();
+								return;
+							}
+							if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
+								currentTab = (currentTab - 1 + totalTabs) % totalTabs;
+								optionIndex = 0;
+								refresh();
 								return;
 							}
 						}
 
-						if (opt.isOther) {
-							inputMode = true;
-							inputQuestionId = q.id;
-							editor.setText("");
+						// Submit tab
+						if (currentTab === questions.length) {
+							if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && allAnswered()) {
+								submit(false);
+							} else if (matchesKey(data, Key.escape)) {
+								submit(true);
+							}
+							return;
+						}
+
+						// Option navigation
+						if (matchesKey(data, Key.up)) {
+							optionIndex = Math.max(0, optionIndex - 1);
 							refresh();
 							return;
 						}
-						saveAnswer(q.id, opt.value, opt.label, false, optionIndex + 1);
-						advanceAfterAnswer();
-						return;
-					}
-
-					// Cancel
-					if (matchesKey(data, Key.escape)) {
-						submit(true);
-					}
-				}
-
-				function render(width: number): string[] {
-					if (cachedLines) return cachedLines;
-
-					const lines: string[] = [];
-					const q = currentQuestion();
-					const opts = currentOptions();
-
-					const add = (s: string) => lines.push(truncateToWidth(s, width));
-					const wrap = (s: string, indent = "") => {
-						const wrapped = wrapTextWithAnsi(s, width - indent.length);
-						lines.push(wrapped[0]);
-						for (let j = 1; j < wrapped.length; j++) lines.push(indent + wrapped[j]);
-					};
-
-					add(theme.fg("accent", "─".repeat(width)));
-
-					// Tab bar (multi-question only)
-					if (isMulti) {
-						const tabs: string[] = ["← "];
-						for (let i = 0; i < questions.length; i++) {
-							const isActive = i === currentTab;
-							const isAnswered = answers.has(questions[i].id);
-							const lbl = questions[i].label;
-							const box = isAnswered ? "■" : "□";
-							const color = isAnswered ? "success" : "muted";
-							const text = ` ${box} ${lbl} `;
-							const styled = isActive ? theme.bg("selectedBg", theme.fg("text", text)) : theme.fg(color, text);
-							tabs.push(`${styled} `);
+						if (matchesKey(data, Key.down)) {
+							optionIndex = Math.min(opts.length - 1, optionIndex + 1);
+							refresh();
+							return;
 						}
-						const canSubmit = allAnswered();
-						const isSubmitTab = currentTab === questions.length;
-						const submitText = " ✓ Submit ";
-						const submitStyled = isSubmitTab
-							? theme.bg("selectedBg", theme.fg("text", submitText))
-							: theme.fg(canSubmit ? "success" : "dim", submitText);
-						tabs.push(`${submitStyled} →`);
-						add(` ${tabs.join("")}`);
-						lines.push("");
+
+						// Select option
+						if ((matchesKey(data, Key.enter) || matchesKey(data, Key.space)) && q) {
+							const opt = opts[optionIndex];
+
+							if (q.multiSelect) {
+								if (matchesKey(data, Key.space)) {
+									if (opt.isOther) {
+										inputMode = true;
+										inputQuestionId = q.id;
+										editor.setText("");
+										refresh();
+										return;
+									}
+									let set = selectedSets.get(q.id);
+									if (!set) {
+										set = new Set();
+										selectedSets.set(q.id, set);
+									}
+									if (set.has(optionIndex)) {
+										set.delete(optionIndex);
+									} else {
+										set.add(optionIndex);
+									}
+									refresh();
+									return;
+								}
+								if (matchesKey(data, Key.enter)) {
+									const set = selectedSets.get(q.id);
+									const customs = customEntries.get(q.id) || [];
+									const hasSelections = (set && set.size > 0) || customs.length > 0;
+									if (opt.isOther && !hasSelections) {
+										inputMode = true;
+										inputQuestionId = q.id;
+										editor.setText("");
+										refresh();
+										return;
+									}
+									if (!hasSelections) return;
+									const sorted = set ? Array.from(set).sort((a, b) => a - b) : [];
+									const values = sorted.map((i) => opts[i].value).concat(customs);
+									const labels = sorted.map((i) => opts[i].label).concat(customs.map((c) => `(wrote) ${c}`));
+									const indices = sorted.map((i) => i + 1);
+									const hasCustom = customs.length > 0;
+									saveAnswer(
+										q.id,
+										values.join(", "),
+										labels.join(", "),
+										hasCustom,
+										undefined,
+										values,
+										labels,
+										indices,
+									);
+									advanceAfterAnswer();
+									return;
+								}
+							}
+
+							if (opt.isOther) {
+								inputMode = true;
+								inputQuestionId = q.id;
+								editor.setText("");
+								refresh();
+								return;
+							}
+							saveAnswer(q.id, opt.value, opt.label, false, optionIndex + 1);
+							advanceAfterAnswer();
+							return;
+						}
+
+						// Cancel
+						if (matchesKey(data, Key.escape)) {
+							submit(true);
+						}
 					}
 
-					// Helper to render options list
-					function renderOptions() {
-						const indent = "     ";
-						const isMultiSel = q?.multiSelect ?? false;
-						const checkedSet = q ? selectedSets.get(q.id) : undefined;
-						const customs = q ? customEntries.get(q.id) || [] : [];
-						for (let i = 0; i < opts.length; i++) {
-							const opt = opts[i];
-							const selected = i === optionIndex;
-							const isOther = opt.isOther === true;
-							const prefix = selected ? theme.fg("accent", "> ") : "  ";
-							const color = selected ? "accent" : "text";
-							const checked = checkedSet?.has(i);
-							const checkbox = isMultiSel ? (checked ? "[✓] " : "[ ] ") : "";
-							if (isOther && inputMode) {
-								wrap(prefix + theme.fg("accent", `${checkbox}${i + 1}. ${opt.label} ✎`), indent);
-							} else {
-								wrap(prefix + theme.fg(color, `${checkbox}${i + 1}. ${opt.label}`), indent);
+					function render(width: number): string[] {
+						if (cachedLines) return cachedLines;
+
+						const lines: string[] = [];
+						const q = currentQuestion();
+						const opts = currentOptions();
+
+						const add = (s: string) => lines.push(truncateToWidth(s, width));
+						const wrap = (s: string, indent = "") => {
+							const wrapped = wrapTextWithAnsi(s, width - indent.length);
+							lines.push(wrapped[0]);
+							for (let j = 1; j < wrapped.length; j++) lines.push(indent + wrapped[j]);
+						};
+
+						add(theme.fg("accent", "─".repeat(width)));
+
+						// Tab bar (multi-question only)
+						if (isMulti) {
+							const tabs: string[] = ["← "];
+							for (let i = 0; i < questions.length; i++) {
+								const isActive = i === currentTab;
+								const isAnswered = answers.has(questions[i].id);
+								const lbl = questions[i].label;
+								const box = isAnswered ? "■" : "□";
+								const color = isAnswered ? "success" : "muted";
+								const text = ` ${box} ${lbl} `;
+								const styled = isActive
+									? theme.bg("selectedBg", theme.fg("text", text))
+									: theme.fg(color, text);
+								tabs.push(`${styled} `);
 							}
-							if (opt.description) {
-								wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
-							}
-						}
-						if (isMultiSel && customs.length > 0) {
+							const canSubmit = allAnswered();
+							const isSubmitTab = currentTab === questions.length;
+							const submitText = " ✓ Submit ";
+							const submitStyled = isSubmitTab
+								? theme.bg("selectedBg", theme.fg("text", submitText))
+								: theme.fg(canSubmit ? "success" : "dim", submitText);
+							tabs.push(`${submitStyled} →`);
+							add(` ${tabs.join("")}`);
 							lines.push("");
-							add(theme.fg("muted", "  Custom entries:"));
-							for (const c of customs) {
-								add(`    ${theme.fg("success", "✓")} ${theme.fg("text", c)}`);
+						}
+
+						// Helper to render options list
+						function renderOptions() {
+							const indent = "     ";
+							const isMultiSel = q?.multiSelect ?? false;
+							const checkedSet = q ? selectedSets.get(q.id) : undefined;
+							const customs = q ? customEntries.get(q.id) || [] : [];
+							for (let i = 0; i < opts.length; i++) {
+								const opt = opts[i];
+								const selected = i === optionIndex;
+								const isOther = opt.isOther === true;
+								const prefix = selected ? theme.fg("accent", "> ") : "  ";
+								const color = selected ? "accent" : "text";
+								const checked = checkedSet?.has(i);
+								const checkbox = isMultiSel ? (checked ? "[✓] " : "[ ] ") : "";
+								if (isOther && inputMode) {
+									wrap(prefix + theme.fg("accent", `${checkbox}${i + 1}. ${opt.label} ✎`), indent);
+								} else {
+									wrap(prefix + theme.fg(color, `${checkbox}${i + 1}. ${opt.label}`), indent);
+								}
+								if (opt.description) {
+									wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
+								}
+							}
+							if (isMultiSel && customs.length > 0) {
+								lines.push("");
+								add(theme.fg("muted", "  Custom entries:"));
+								for (const c of customs) {
+									add(`    ${theme.fg("success", "✓")} ${theme.fg("text", c)}`);
+								}
 							}
 						}
-					}
 
-					// Content
-					if (inputMode && q) {
-						wrap(theme.fg("text", ` ${q.prompt}`), " ");
-						lines.push("");
-						// Show options for reference
-						renderOptions();
-						lines.push("");
-						add(theme.fg("muted", " Your answer:"));
-						for (const line of editor.render(width - 2)) {
-							add(` ${line}`);
-						}
-						lines.push("");
-						add(theme.fg("dim", " Enter to submit • Esc to cancel"));
-					} else if (currentTab === questions.length) {
-						add(theme.fg("accent", theme.bold(" Ready to submit")));
-						lines.push("");
-						for (const question of questions) {
-							const answer = answers.get(question.id);
-							if (answer) {
-								const prefix = answer.wasCustom ? "(wrote) " : "";
-								wrap(
-									`${theme.fg("muted", ` ${question.label}: `)}${theme.fg("text", prefix + answer.label)}`,
-									"   ",
-								);
+						// Content
+						if (inputMode && q) {
+							wrap(theme.fg("text", ` ${q.prompt}`), " ");
+							lines.push("");
+							// Show options for reference
+							renderOptions();
+							lines.push("");
+							add(theme.fg("muted", " Your answer:"));
+							for (const line of editor.render(width - 2)) {
+								add(` ${line}`);
 							}
+							lines.push("");
+							add(theme.fg("dim", " Enter to submit • Esc to cancel"));
+						} else if (currentTab === questions.length) {
+							add(theme.fg("accent", theme.bold(" Ready to submit")));
+							lines.push("");
+							for (const question of questions) {
+								const answer = answers.get(question.id);
+								if (answer) {
+									const prefix = answer.wasCustom ? "(wrote) " : "";
+									wrap(
+										`${theme.fg("muted", ` ${question.label}: `)}${theme.fg("text", prefix + answer.label)}`,
+										"   ",
+									);
+								}
+							}
+							lines.push("");
+							if (allAnswered()) {
+								add(theme.fg("success", " Press Enter to submit"));
+							} else {
+								const missing = questions
+									.filter((q) => !answers.has(q.id))
+									.map((q) => q.label)
+									.join(", ");
+								add(theme.fg("warning", ` Unanswered: ${missing}`));
+							}
+						} else if (q) {
+							wrap(theme.fg("text", ` ${q.prompt}`), " ");
+							lines.push("");
+							renderOptions();
 						}
+
 						lines.push("");
-						if (allAnswered()) {
-							add(theme.fg("success", " Press Enter to submit"));
-						} else {
-							const missing = questions
-								.filter((q) => !answers.has(q.id))
-								.map((q) => q.label)
-								.join(", ");
-							add(theme.fg("warning", ` Unanswered: ${missing}`));
+						if (!inputMode) {
+							const currentQ = currentQuestion();
+							const isMultiSel = currentQ?.multiSelect ?? false;
+							let help: string;
+							if (isMultiSel) {
+								help = isMulti
+									? " Tab/←→ navigate • ↑↓ move • Space toggle • Enter confirm • Esc cancel"
+									: " ↑↓ navigate • Space toggle • Enter confirm • Esc cancel";
+							} else {
+								help = isMulti
+									? " Tab/←→ navigate • ↑↓ select • Space/Enter confirm • Esc cancel"
+									: " ↑↓ navigate • Space/Enter select • Esc cancel";
+							}
+							add(theme.fg("dim", help));
 						}
-					} else if (q) {
-						wrap(theme.fg("text", ` ${q.prompt}`), " ");
-						lines.push("");
-						renderOptions();
+						add(theme.fg("accent", "─".repeat(width)));
+
+						cachedLines = lines;
+						return lines;
 					}
 
-					lines.push("");
-					if (!inputMode) {
-						const currentQ = currentQuestion();
-						const isMultiSel = currentQ?.multiSelect ?? false;
-						let help: string;
-						if (isMultiSel) {
-							help = isMulti
-								? " Tab/←→ navigate • ↑↓ move • Space toggle • Enter confirm • Esc cancel"
-								: " ↑↓ navigate • Space toggle • Enter confirm • Esc cancel";
-						} else {
-							help = isMulti
-								? " Tab/←→ navigate • ↑↓ select • Space/Enter confirm • Esc cancel"
-								: " ↑↓ navigate • Space/Enter select • Esc cancel";
-						}
-						add(theme.fg("dim", help));
-					}
-					add(theme.fg("accent", "─".repeat(width)));
-
-					cachedLines = lines;
-					return lines;
-				}
-
-				return {
-					render,
-					invalidate: () => {
-						cachedLines = undefined;
-					},
-					handleInput,
-				};
-			});
+					return {
+						render,
+						invalidate: () => {
+							cachedLines = undefined;
+						},
+						handleInput,
+					};
+				});
+			} finally {
+				sendSupacodeFlag("1");
+			}
 
 			if (result.cancelled) {
 				return {
