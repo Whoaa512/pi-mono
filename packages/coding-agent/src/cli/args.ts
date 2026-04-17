@@ -17,7 +17,7 @@ export interface Args {
 	appendSystemPrompt?: string[];
 	thinking?: ThinkingLevel;
 	continue?: boolean;
-	resume?: boolean;
+	resume?: boolean | string;
 	help?: boolean;
 	version?: boolean;
 	mode?: Mode;
@@ -79,7 +79,13 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
-			result.resume = true;
+			const next = args[i + 1];
+			if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
+				result.resume = next;
+				i++;
+			} else {
+				result.resume = true;
+			}
 		} else if (arg === "--provider" && i + 1 < args.length) {
 			result.provider = args[++i];
 		} else if (arg === "--model" && i + 1 < args.length) {
@@ -222,7 +228,7 @@ ${chalk.bold("Options:")}
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
-  --resume, -r                   Select a session to resume
+  --resume, -r [id|prefix]       Resume a session by ID/prefix, or pick one if omitted
   --session <path|id>            Use specific session file or partial UUID
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup

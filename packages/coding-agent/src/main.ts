@@ -261,6 +261,30 @@ async function createSessionManager(
 	}
 
 	if (parsed.resume) {
+		if (typeof parsed.resume === "string") {
+			const resolved = await resolveSessionPath(parsed.resume, cwd, sessionDir);
+
+			switch (resolved.type) {
+				case "path":
+				case "local":
+					return SessionManager.open(resolved.path, sessionDir);
+
+				case "global": {
+					console.log(chalk.yellow(`Session found in different project: ${resolved.cwd}`));
+					const shouldFork = await promptConfirm("Fork this session into current directory?");
+					if (!shouldFork) {
+						console.log(chalk.dim("Aborted."));
+						process.exit(0);
+					}
+					return forkSessionOrExit(resolved.path, cwd, sessionDir);
+				}
+
+				case "not_found":
+					console.error(chalk.red(`No session found matching '${resolved.arg}'`));
+					process.exit(1);
+			}
+		}
+
 		initTheme(settingsManager.getTheme(), true);
 		try {
 			const selectedPath = await selectSession(

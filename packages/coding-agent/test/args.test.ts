@@ -82,6 +82,22 @@ describe("parseArgs", () => {
 			const result = parseArgs(["-r"]);
 			expect(result.resume).toBe(true);
 		});
+
+		test("parses --resume with session id", () => {
+			const result = parseArgs(["--resume", "a17ad467-b65c-499e-8d07-5eaecea46be5"]);
+			expect(result.resume).toBe("a17ad467-b65c-499e-8d07-5eaecea46be5");
+		});
+
+		test("parses -r with session id prefix", () => {
+			const result = parseArgs(["-r", "a17ad467"]);
+			expect(result.resume).toBe("a17ad467");
+		});
+
+		test("-r before another flag stays boolean", () => {
+			const result = parseArgs(["-r", "--verbose"]);
+			expect(result.resume).toBe(true);
+			expect(result.verbose).toBe(true);
+		});
 	});
 
 	describe("flags with values", () => {
