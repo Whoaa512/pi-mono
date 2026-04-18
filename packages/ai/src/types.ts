@@ -320,6 +320,8 @@ export interface OpenAICompletionsCompat {
 	sendSessionAffinityHeaders?: boolean;
 	/** Whether the provider supports long prompt cache retention (`prompt_cache_retention: "24h"` or Anthropic-style `cache_control.ttl: "1h"`, depending on format). Default: true. */
 	supportsLongCacheRetention?: boolean;
+	/** Disable automatic Anthropic-style `cache_control` breakpoints. By default, breakpoints are injected when the model id contains `anthropic` or `claude`. Set to true for proxies that reject unknown fields. Default: false. */
+	disableAnthropicCacheControl?: boolean;
 }
 
 /** Compatibility settings for OpenAI Responses APIs. */
