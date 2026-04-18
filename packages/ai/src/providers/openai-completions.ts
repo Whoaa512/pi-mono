@@ -627,6 +627,8 @@ function buildParams(
 		}
 	}
 
+	maybeAddAnthropicCacheControl(model, compat, params);
+
 	return params;
 }
 
@@ -1132,6 +1134,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		cacheControlFormat,
 		sendSessionAffinityHeaders: false,
 		supportsLongCacheRetention: !(isTogether || isCloudflareWorkersAI || isCloudflareAiGateway),
+		disableAnthropicCacheControl: false,
 	};
 }
 
@@ -1164,5 +1167,6 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		cacheControlFormat: model.compat.cacheControlFormat ?? detected.cacheControlFormat,
 		sendSessionAffinityHeaders: model.compat.sendSessionAffinityHeaders ?? detected.sendSessionAffinityHeaders,
 		supportsLongCacheRetention: model.compat.supportsLongCacheRetention ?? detected.supportsLongCacheRetention,
+		disableAnthropicCacheControl: model.compat.disableAnthropicCacheControl ?? detected.disableAnthropicCacheControl,
 	};
 }

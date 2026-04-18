@@ -348,6 +348,11 @@
 - Added `onResponse` to `StreamOptions` so callers can inspect provider HTTP status and headers after each response arrives and before the response stream is consumed ([#3128](https://github.com/badlogic/pi-mono/issues/3128))
 - Added `thinkingDisplay` (`"summarized" | "omitted"`) to `AnthropicOptions` and `BedrockOptions`, wiring it through to the Anthropic/Bedrock `thinking` config. Defaults to `"summarized"` so Claude Opus 4.7 and Mythos Preview keep returning thinking text; set it to `"omitted"` to skip thinking streaming for faster time-to-first-text-token.
 - Added optional assistant message duration metadata so clients can display response timing.
+- Added `compat.disableAnthropicCacheControl` opt-out for `openai-completions` proxies that reject unknown fields.
+
+### Fixed
+
+- Fixed Anthropic prompt caching via `openai-completions`-shaped proxies (devai, bedrock gateways, etc.) by injecting `cache_control` breakpoints on system prompt, last tool, and the last two user messages whenever the model id matches `anthropic`/`claude`, not only the OpenRouter `anthropic/*` path. Previously only OpenRouter got cache hits; opus via other Anthropic-fronting proxies re-paid full input tokens every turn.
 
 ### Fixed
 
