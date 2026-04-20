@@ -56,8 +56,8 @@ function anthropicLikeModel(id: string, compat?: Record<string, unknown>) {
 		...baseModel,
 		api: "openai-completions",
 		id,
-		provider: "devai",
-		baseUrl: "https://devaigateway.example.com/v1",
+		provider: "custom",
+		baseUrl: "https://gateway.example.com/v1",
 		...(compat ? { compat } : {}),
 	} as const;
 }
