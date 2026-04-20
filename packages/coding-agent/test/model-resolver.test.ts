@@ -223,8 +223,8 @@ describe("parseModelPattern", () => {
 				id: "global.anthropic.claude-opus-4-6-v1",
 				name: "claude-opus-4.6",
 				api: "anthropic-messages",
-				provider: "devai",
-				baseUrl: "https://devai.example.com/v1",
+				provider: "custom-gateway",
+				baseUrl: "https://custom-gateway.example.com/v1",
 				reasoning: true,
 				input: ["text", "image"],
 				cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
@@ -232,10 +232,10 @@ describe("parseModelPattern", () => {
 				maxTokens: 8192,
 			};
 			const models = [bedrockOpus, customOpus];
-			const hasAuth = (p: string) => p === "devai";
+			const hasAuth = (p: string) => p === "custom-gateway";
 
 			const result = parseModelPattern("opus", models, { hasAuth });
-			expect(result.model?.provider).toBe("devai");
+			expect(result.model?.provider).toBe("custom-gateway");
 		});
 
 		test("falls back to all matches when no provider has auth", () => {
@@ -447,8 +447,8 @@ describe("resolveCliModel", () => {
 			id: "global.anthropic.claude-opus-4-6-v1",
 			name: "claude-opus-4.6",
 			api: "anthropic-messages",
-			provider: "devai",
-			baseUrl: "https://devai.example.com/v1",
+			provider: "custom-gateway",
+			baseUrl: "https://custom-gateway.example.com/v1",
 			reasoning: true,
 			input: ["text", "image"],
 			cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
@@ -458,7 +458,7 @@ describe("resolveCliModel", () => {
 		const modelsWithOpus = [...allModels, bedrockOpus, customOpus];
 		const registry = {
 			getAll: () => modelsWithOpus,
-			hasAuth: (p: string) => p === "devai",
+			hasAuth: (p: string) => p === "custom-gateway",
 		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
 
 		const result = resolveCliModel({
@@ -467,7 +467,7 @@ describe("resolveCliModel", () => {
 		});
 
 		expect(result.error).toBeUndefined();
-		expect(result.model?.provider).toBe("devai");
+		expect(result.model?.provider).toBe("custom-gateway");
 	});
 });
 

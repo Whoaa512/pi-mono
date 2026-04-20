@@ -229,7 +229,7 @@
 
 ### Fixed
 
-- Fixed Anthropic prompt caching via `openai-completions`-shaped proxies (devai, bedrock gateways, etc.) by injecting `cache_control` breakpoints on system prompt, last tool, and the last two user messages whenever the model id matches `anthropic`/`claude`, not only the OpenRouter `anthropic/*` path. Previously only OpenRouter got cache hits; opus via other Anthropic-fronting proxies re-paid full input tokens every turn.
+- Fixed Anthropic prompt caching via `openai-completions`-shaped proxies (internal gateways, bedrock-via-openai-shape, etc.) by injecting `cache_control` breakpoints on system prompt, last tool, and the last two user messages whenever the model id matches `anthropic`/`claude`, not only the OpenRouter `anthropic/*` path. Previously only OpenRouter got cache hits; opus via other Anthropic-fronting proxies re-paid full input tokens every turn.
 
 ### Fixed
 
