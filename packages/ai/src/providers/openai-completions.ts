@@ -627,8 +627,6 @@ function buildParams(
 		}
 	}
 
-	maybeAddAnthropicCacheControl(model, compat, params);
-
 	return params;
 }
 
