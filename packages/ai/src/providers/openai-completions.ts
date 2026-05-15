@@ -609,7 +609,9 @@ function applyAnthropicCacheControl(
 ): void {
 	addCacheControlToSystemPrompt(messages, cacheControl);
 	addCacheControlToLastTool(tools, cacheControl);
-	addCacheControlToLastNConversationMessages(messages, cacheControl, 3);
+	// Cap conversation breakpoints to 2: matches Claude Code's strategy and keeps
+	// total breakpoints (system + tool + 2 conv) at Anthropic's hard limit of 4.
+	addCacheControlToLastNConversationMessages(messages, cacheControl, 2);
 }
 
 function addCacheControlToSystemPrompt(
@@ -971,13 +973,26 @@ function parseChunkUsage(
 		prompt_tokens?: number;
 		completion_tokens?: number;
 		prompt_cache_hit_tokens?: number;
-		prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+		prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number; cache_creation_tokens?: number };
+		cache_creation_input_tokens?: number;
+		cache_read_input_tokens?: number;
 	},
 	model: Model<"openai-completions">,
 ): AssistantMessage["usage"] {
 	const promptTokens = rawUsage.prompt_tokens || 0;
-	const reportedCachedTokens = rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? 0;
-	const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
+	// Anthropic-shaped proxies (e.g. devai gateway, Bedrock-via-OpenAI) sometimes
+	// surface cache stats in Anthropic's native field names alongside or instead
+	// of OpenAI's. Prefer OpenAI shape, fall back to Anthropic shape.
+	const reportedCachedTokens =
+		rawUsage.prompt_tokens_details?.cached_tokens ??
+		rawUsage.prompt_cache_hit_tokens ??
+		rawUsage.cache_read_input_tokens ??
+		0;
+	const cacheWriteTokens =
+		rawUsage.prompt_tokens_details?.cache_write_tokens ||
+		rawUsage.prompt_tokens_details?.cache_creation_tokens ||
+		rawUsage.cache_creation_input_tokens ||
+		0;
 
 	// Normalize to pi-ai semantics:
 	// - cacheRead: hits from cache created by previous requests only

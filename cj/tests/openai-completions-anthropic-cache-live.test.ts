@@ -46,6 +46,7 @@ describe.skipIf(!LIVE)("openai-completions anthropic cache_control (live)", () =
 			contextWindow: 1_000_000,
 			maxTokens: 4_000,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			input: ["text"],
 			compat: {
 				supportsStore: false,
 				supportsDeveloperRole: false,
@@ -54,7 +55,8 @@ describe.skipIf(!LIVE)("openai-completions anthropic cache_control (live)", () =
 			headers: { "user-agent": process.env.LIVE_USER_AGENT ?? "pi-mono-cache-live-test" },
 		} as unknown as Model<"openai-completions">;
 
-		const bigSystem = "You are a helpful assistant. " + "lorem ipsum ".repeat(500);
+		// Opus prompt cache minimum is ~1024 tokens; pad well above that.
+		const bigSystem = "You are a helpful assistant. " + "lorem ipsum dolor sit amet consectetur adipiscing elit. ".repeat(800);
 		const turn1: Message[] = [{ role: "user", content: "Say hello in 3 words.", timestamp: Date.now() }];
 
 		const r1 = await streamSimple(

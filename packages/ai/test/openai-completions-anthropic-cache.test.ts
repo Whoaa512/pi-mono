@@ -67,7 +67,7 @@ describe("openai-completions Anthropic cache_control", () => {
 		mockState.lastParams = undefined;
 	});
 
-	it("injects cache_control on system, last tool, and last two user messages for anthropic-id models", async () => {
+	it("injects cache_control on system, last tool, and last two conversation messages for anthropic-id models", async () => {
 		const tools: Tool[] = [
 			{ name: "ping", description: "ping", parameters: Type.Object({ ok: Type.Boolean() }) },
 			{ name: "pong", description: "pong", parameters: Type.Object({ ok: Type.Boolean() }) },
@@ -98,11 +98,15 @@ describe("openai-completions Anthropic cache_control", () => {
 		expect(params.tools?.[0].cache_control).toBeUndefined();
 		expect(params.tools?.[1].cache_control).toEqual({ type: "ephemeral" });
 
+		// Cap of 2 conversation breakpoints: last user + previous assistant.
+		// Total breakpoints stays within Anthropic's hard limit of 4 (system + tool + 2 conv).
 		const userMsgs = params.messages.filter((m) => m.role === "user");
+		const assistantMsgs = params.messages.filter((m) => m.role === "assistant");
 		expect(userMsgs.length).toBe(3);
 		expect(findCacheControl(userMsgs[0].content)).toBe(false);
-		expect(findCacheControl(userMsgs[1].content)).toBe(true);
+		expect(findCacheControl(userMsgs[1].content)).toBe(false);
 		expect(findCacheControl(userMsgs[2].content)).toBe(true);
+		expect(findCacheControl(assistantMsgs[assistantMsgs.length - 1].content)).toBe(true);
 	});
 
 	it("also triggers on claude id without anthropic prefix", async () => {
