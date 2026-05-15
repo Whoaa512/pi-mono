@@ -634,7 +634,7 @@ function getCompatCacheControl(
 	compat: ResolvedOpenAICompletionsCompat,
 	cacheRetention: CacheRetention,
 ): OpenAICompatCacheControl | undefined {
-	if (compat.cacheControlFormat !== "anthropic" || cacheRetention === "none") {
+	if (compat.disableAnthropicCacheControl || compat.cacheControlFormat !== "anthropic" || cacheRetention === "none") {
 		return undefined;
 	}
 
@@ -649,7 +649,7 @@ function applyAnthropicCacheControl(
 ): void {
 	addCacheControlToSystemPrompt(messages, cacheControl);
 	addCacheControlToLastTool(tools, cacheControl);
-	addCacheControlToLastConversationMessage(messages, cacheControl);
+	addCacheControlToLastNConversationMessages(messages, cacheControl, 3);
 }
 
 function addCacheControlToSystemPrompt(
@@ -664,15 +664,17 @@ function addCacheControlToSystemPrompt(
 	}
 }
 
-function addCacheControlToLastConversationMessage(
+function addCacheControlToLastNConversationMessages(
 	messages: ChatCompletionMessageParam[],
 	cacheControl: OpenAICompatCacheControl,
+	count: number,
 ): void {
-	for (let i = messages.length - 1; i >= 0; i--) {
+	let marked = 0;
+	for (let i = messages.length - 1; i >= 0 && marked < count; i--) {
 		const message = messages[i];
 		if (message.role === "user" || message.role === "assistant") {
 			if (addCacheControlToMessage(message, cacheControl)) {
-				return;
+				marked++;
 			}
 		}
 	}
@@ -1104,7 +1106,16 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 
 	const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
 	const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
-	const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;
+
+	// Auto-detect Anthropic models for cache_control breakpoints.
+	// Matches: OpenRouter anthropic/* routes, and any model whose ID contains
+	// "anthropic" or "claude" (e.g. devai gateway: global.anthropic.claude-opus-4-7).
+	const modelIdLower = model.id.toLowerCase();
+	const isAnthropicModel =
+		(provider === "openrouter" && model.id.startsWith("anthropic/")) ||
+		modelIdLower.includes("anthropic") ||
+		modelIdLower.includes("claude");
+	const cacheControlFormat = isAnthropicModel ? "anthropic" : undefined;
 
 	return {
 		supportsStore: !isNonStandard,
