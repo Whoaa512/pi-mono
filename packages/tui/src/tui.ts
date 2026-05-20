@@ -966,6 +966,11 @@ export class TUI extends Container {
 			return targetScreenRow - currentScreenRow;
 		};
 
+		// Invalidate cached state when dimensions change so components re-render fresh
+		if (widthChanged || heightChanged) {
+			this.invalidate();
+		}
+
 		// Render all components to get new lines
 		let newLines = this.render(width);
 

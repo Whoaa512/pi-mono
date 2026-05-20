@@ -138,6 +138,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 					let inputMode = false;
 					let inputQuestionId: string | null = null;
 					let cachedLines: string[] | undefined;
+					let cachedWidth: number | undefined;
 					const answers = new Map<string, Answer>();
 					const selectedSets = new Map<string, Set<number>>();
 					const customEntries = new Map<string, string[]>();
@@ -368,7 +369,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 					}
 
 					function render(width: number): string[] {
-						if (cachedLines) return cachedLines;
+						if (cachedLines && cachedWidth === width) return cachedLines;
 
 						const lines: string[] = [];
 						const q = currentQuestion();
@@ -502,6 +503,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 						add(theme.fg("accent", "─".repeat(width)));
 
 						cachedLines = lines;
+						cachedWidth = width;
 						return lines;
 					}
 

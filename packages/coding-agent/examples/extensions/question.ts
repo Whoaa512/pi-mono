@@ -88,6 +88,7 @@ export default function question(pi: ExtensionAPI) {
 						let optionIndex = 0;
 						let editMode = false;
 						let cachedLines: string[] | undefined;
+						let cachedWidth: number | undefined;
 
 						const editorTheme: EditorTheme = {
 							borderColor: (s) => theme.fg("accent", s),
@@ -158,7 +159,7 @@ export default function question(pi: ExtensionAPI) {
 						}
 
 						function render(width: number): string[] {
-							if (cachedLines) return cachedLines;
+							if (cachedLines && cachedWidth === width) return cachedLines;
 
 							const lines: string[] = [];
 							const add = (s: string) => lines.push(truncateToWidth(s, width));
@@ -209,6 +210,7 @@ export default function question(pi: ExtensionAPI) {
 							add(theme.fg("accent", "─".repeat(width)));
 
 							cachedLines = lines;
+							cachedWidth = width;
 							return lines;
 						}
 
