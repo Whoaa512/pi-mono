@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import chalk from "chalk";
 import { CONFIG_DIR_NAME } from "../config.ts";

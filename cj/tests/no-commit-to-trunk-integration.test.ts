@@ -12,9 +12,9 @@ import { join } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createHarnessWithExtensions, type Harness } from "../../packages/coding-agent/test/test-harness.js";
-import { createTestResourceLoader } from "../../packages/coding-agent/test/utilities.js";
-import { loadExtensions } from "../../packages/coding-agent/src/core/extensions/loader.js";
+import { createHarnessWithExtensions, type Harness } from "../../packages/coding-agent/test/test-harness.ts";
+import { createTestResourceLoader } from "../../packages/coding-agent/test/utilities.ts";
+import { loadExtensions } from "../../packages/coding-agent/src/core/extensions/loader.ts";
 
 const EXTENSION_PATH = join(
 	process.env.HOME ?? "",

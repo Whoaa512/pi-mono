@@ -22,8 +22,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { streamSimple } from "../../packages/ai/src/stream.js";
-import type { Message, Model } from "../../packages/ai/src/types.js";
+import { streamSimple } from "../../packages/ai/src/stream.ts";
+import type { Message, Model } from "../../packages/ai/src/types.ts";
 
 const LIVE = process.env.RUN_LIVE_ANTHROPIC_CACHE === "1";
 

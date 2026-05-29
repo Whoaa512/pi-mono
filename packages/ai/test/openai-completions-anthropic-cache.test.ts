@@ -1,8 +1,8 @@
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getModel } from "../src/models.js";
-import { streamSimple } from "../src/stream.js";
-import type { Message, Tool } from "../src/types.js";
+import { getModel } from "../src/models.ts";
+import { streamSimple } from "../src/stream.ts";
+import type { Message, Tool } from "../src/types.ts";
 
 const mockState = vi.hoisted(() => ({
 	lastParams: undefined as unknown,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { transformMessages } from "../src/providers/transform-messages.js";
-import type { AssistantMessage, Message, Model, ToolCall, ToolResultMessage } from "../src/types.js";
+import { transformMessages } from "../src/providers/transform-messages.ts";
+import type { AssistantMessage, Message, Model, ToolCall, ToolResultMessage } from "../src/types.ts";
 
 function makeModel(): Model<"openai-completions"> {
 	return {

@@ -8,8 +8,8 @@ let historyDir: string;
 let legacyFile: string;
 const TEST_CWD = "/test/project";
 
-vi.mock("../src/config.js", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/config.js")>();
+vi.mock("../src/config.ts", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/config.ts")>();
 	return {
 		...original,
 		getPromptHistoryPath: (cwd: string) => {
@@ -36,18 +36,18 @@ describe("prompt-history", () => {
 	});
 
 	it("returns empty array when no file exists", async () => {
-		const { loadPromptHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory } = await import("../src/core/prompt-history.ts");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
 	it("saves and loads a prompt", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("hello world");
 		expect(loadPromptHistory()).toEqual(["hello world"]);
 	});
 
 	it("maintains most-recent-first ordering", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("first");
 		savePromptToHistory("second");
 		savePromptToHistory("third");
@@ -55,7 +55,7 @@ describe("prompt-history", () => {
 	});
 
 	it("deduplicates by moving repeated prompt to front", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("a");
 		savePromptToHistory("b");
 		savePromptToHistory("a");
@@ -63,36 +63,36 @@ describe("prompt-history", () => {
 	});
 
 	it("trims whitespace before saving", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("  hello  ");
 		expect(loadPromptHistory()).toEqual(["hello"]);
 	});
 
 	it("ignores empty/whitespace-only prompts", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("");
 		savePromptToHistory("   ");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
 	it("handles corrupted file gracefully", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("seed");
-		const { getPromptHistoryPath } = await import("../src/config.js");
+		const { getPromptHistoryPath } = await import("../src/config.ts");
 		fs.writeFileSync(getPromptHistoryPath(TEST_CWD), "not json", "utf-8");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
 	it("handles file with wrong shape gracefully", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("seed");
-		const { getPromptHistoryPath } = await import("../src/config.js");
+		const { getPromptHistoryPath } = await import("../src/config.ts");
 		fs.writeFileSync(getPromptHistoryPath(TEST_CWD), JSON.stringify({ prompts: "not-an-array" }), "utf-8");
 		expect(loadPromptHistory()).toEqual([]);
 	});
 
 	it("caps history at 500 entries", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		for (let i = 0; i < 510; i++) {
 			savePromptToHistory(`prompt-${i}`);
 		}
@@ -102,7 +102,7 @@ describe("prompt-history", () => {
 	});
 
 	it("isolates history per directory", async () => {
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 
 		savePromptToHistory("from-project-a");
 
@@ -120,14 +120,14 @@ describe("prompt-history", () => {
 	it("migrates from legacy global file when per-dir file missing", async () => {
 		fs.writeFileSync(legacyFile, JSON.stringify({ prompts: ["legacy-prompt"] }), "utf-8");
 
-		const { loadPromptHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory } = await import("../src/core/prompt-history.ts");
 		expect(loadPromptHistory()).toEqual(["legacy-prompt"]);
 	});
 
 	it("per-dir file takes precedence once written", async () => {
 		fs.writeFileSync(legacyFile, JSON.stringify({ prompts: ["legacy-prompt"] }), "utf-8");
 
-		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.js");
+		const { loadPromptHistory, savePromptToHistory } = await import("../src/core/prompt-history.ts");
 		savePromptToHistory("new-prompt");
 
 		expect(loadPromptHistory()[0]).toBe("new-prompt");

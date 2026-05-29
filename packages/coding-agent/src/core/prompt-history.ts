@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getLegacyPromptHistoryPath, getPromptHistoryPath } from "../config.js";
+import { getLegacyPromptHistoryPath, getPromptHistoryPath } from "../config.ts";
 
 const MAX_ENTRIES = 500;
 

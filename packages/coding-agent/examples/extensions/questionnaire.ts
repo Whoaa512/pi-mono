@@ -7,7 +7,15 @@
 
 import { connect } from "node:net";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Editor, type EditorTheme, Key, matchesKey, Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import {
+	Editor,
+	type EditorTheme,
+	Key,
+	matchesKey,
+	Text,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 function sendSupacodeFlag(flag: "0" | "1" | "2"): void {
