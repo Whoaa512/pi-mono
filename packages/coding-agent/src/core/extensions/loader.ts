@@ -421,18 +421,16 @@ export async function loadExtensions(
 	paths: string[],
 	cwd: string,
 	eventBus?: EventBus,
-	options?: { getExtensionSettings?: (extensionName: string) => Record<string, unknown> },
+	runtime?: ExtensionRuntime,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
 	const resolvedCwd = resolvePath(cwd);
 	const resolvedEventBus = eventBus ?? createEventBus();
-	const runtime = createExtensionRuntime({
-		getExtensionSettings: options?.getExtensionSettings,
-	});
+	const resolvedRuntime = runtime ?? createExtensionRuntime();
 
 	for (const extPath of paths) {
-		const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, runtime);
+		const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, resolvedRuntime);
 
 		if (error) {
 			errors.push({ path: extPath, error });
@@ -447,7 +445,7 @@ export async function loadExtensions(
 	return {
 		extensions,
 		errors,
-		runtime,
+		runtime: resolvedRuntime,
 	};
 }
 
@@ -568,7 +566,7 @@ export async function discoverAndLoadExtensions(
 	cwd: string,
 	agentDir: string = getAgentDir(),
 	eventBus?: EventBus,
-	options?: { getExtensionSettings?: (extensionName: string) => Record<string, unknown> },
+	runtime?: ExtensionRuntime,
 ): Promise<LoadExtensionsResult> {
 	const resolvedCwd = resolvePath(cwd);
 	const resolvedAgentDir = resolvePath(agentDir);
@@ -611,5 +609,5 @@ export async function discoverAndLoadExtensions(
 		addPaths([resolved]);
 	}
 
-	return loadExtensions(allPaths, resolvedCwd, eventBus, options);
+	return loadExtensions(allPaths, resolvedCwd, eventBus, runtime);
 }
