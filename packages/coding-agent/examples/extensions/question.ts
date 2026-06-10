@@ -68,7 +68,9 @@ export default function question(pi: ExtensionAPI) {
 		parameters: QuestionParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (ctx.mode !== "tui") {
+			// Guard on hasUI (true in TUI and RPC-with-host modes like Supacode), not mode==="tui".
+			// An RPC host injects a working uiContext, so custom() renders fine there.
+			if (!ctx.hasUI) {
 				return {
 					content: [{ type: "text", text: "Error: UI not available (running in non-interactive mode)" }],
 					details: {
