@@ -29,9 +29,11 @@ git status && git branch --show-current
 git fetch upstream
 git log --oneline cj-main..upstream/main | head -30   # what's incoming
 git log --oneline upstream/main..cj-main --no-merges    # our patches
+# scan upstream's Breaking Changes / Removed for things our fork or exts rely on:
+git show upstream/main:packages/coding-agent/CHANGELOG.md | rg -iA2 'Breaking Changes|Removed' | head -60
 ```
 
-Summarize for the user: how many incoming commits, how many fork patches, and any plan doc under `cj/` (e.g. `cj/upstream-rebase-plan-*.md`).
+Summarize for the user: how many incoming commits, how many fork patches, any relevant Breaking/Removed entries, and any plan doc under `cj/` (e.g. `cj/upstream-rebase-plan-*.md`).
 
 ## 2. Fresh throwaway branch + safety tag
 
@@ -83,19 +85,32 @@ Common post-rebase fixups: `.js`→`.ts` relative imports in cj tests, version b
 
 Commit the cleanup on the throwaway branch (stage only your files; `PI_ALLOW_LOCKFILE_CHANGE=1` if the lockfile is part of the change).
 
-## 6. Rebuild the user's binary
+## 6. Audit silent obsoletions (auto-merged breakages)
 
-`~/bin/pi` symlinks to `packages/coding-agent/dist/cli.js`, so step 5's build already refreshes it. Confirm:
+The most dangerous regressions leave **no conflict marker**: when upstream edits a line our fork also touched in a similar-looking way, git auto-merges and silently flips behavior. Green checks + green tests do NOT catch these if no test covers the path. After validation, audit explicitly:
+
+1. **Diff fork-feature files across the rebase** and eyeball semantic flips:
+   ```bash
+   git diff cj-main-pre-rebase-$(date +%F) HEAD -- <fork-feature-file>
+   ```
+   Prioritize the files our feature patches touch (`git log --oneline upstream/main..cj-main --no-merges` → `--stat`).
+2. **Cross-check upstream's Breaking Changes / Removed** (from step 1) against fork + extension reliance. Recurring offenders: tool `execute` signature order, `@sinclair/typebox` → `typebox` (the `/compiler` shim was dropped — import `Type` from `@earendil-works/pi-ai` or `typebox`), `--no-context-files` gating, ext `ctx` shape.
+3. **Known recurring silent flip:** `examples/extensions/question.ts` + `questionnaire.ts` guard. Upstream keeps setting `if (ctx.mode !== "tui")`; we require `if (!ctx.hasUI)` (breaks Supacode/RPC otherwise). Grep both files and revert. See `AGENTS.local.md`.
+4. **External extension dirs are not in this repo** (CJ's dotfiles exts, `~/.pi/agent/extensions/`) so scope/import migrations (`@mariozechner` → `@earendil-works`, typebox) never show as conflicts. The `cj/tests/` suite imports and exercises several of them — `npx vitest --run cj/tests/` is the canary. If an ext import broke, fix it in its source dir (dotfiles repo, committed separately) and rerun.
+
+## 7. Rebuild the user's binary
+
+`~/bin/pi` symlinks to `packages/coding-agent/dist/cli.js`, so step 5's build already refreshes it. Note: `examples/extensions/*` are NOT bundled into `dist/` — they load from source via jiti, so ext fixes land on the user's next reload without a rebuild. Confirm:
 
 ```bash
 ls -la ~/bin/pi && pi --version
 ```
 
-## 7. WAIT for user validation
+## 8. WAIT for user validation
 
 Do not promote. Report status (conflicts resolved, checks green, tests green, binary rebuilt) and hand off to the user to dogfood. Only continue when the user explicitly says it works / to promote.
 
-## 8. Tag + promote cj-main
+## 9. Tag + promote cj-main
 
 Only after the user confirms:
 
@@ -112,6 +127,6 @@ git push origin cj-main
 git push origin cj-main-pre-rebase-$(date +%F) cj-main-rebased-$(date +%F)
 ```
 
-## 9. Update the runbook
+## 10. Update the runbook
 
-If you learned a new conflict pattern, baked-in decision, or validation step, append it to `AGENTS.local.md` so the next rebase is cheaper.
+If you learned a new conflict pattern, silent-obsoletion, baked-in decision, or validation step, append it to `AGENTS.local.md` so the next rebase is cheaper.
