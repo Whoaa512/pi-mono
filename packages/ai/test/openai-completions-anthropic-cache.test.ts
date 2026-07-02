@@ -11,9 +11,9 @@ vi.mock("openai", () => {
 	class FakeOpenAI {
 		chat = {
 			completions: {
-				create: async (params: unknown) => {
+				create: (params: unknown) => {
 					mockState.lastParams = params;
-					return {
+					const stream = {
 						async *[Symbol.asyncIterator]() {
 							yield {
 								choices: [{ delta: {}, finish_reason: "stop" }],
@@ -25,6 +25,12 @@ vi.mock("openai", () => {
 								},
 							};
 						},
+					};
+					return {
+						withResponse: async () => ({
+							data: stream,
+							response: { status: 200, headers: new Headers() },
+						}),
 					};
 				},
 			},
@@ -73,9 +79,19 @@ describe("openai-completions Anthropic cache_control", () => {
 		];
 		const messages: Message[] = [
 			{ role: "user", content: "first", timestamp: 1 },
-			{ role: "assistant", content: [{ type: "text", text: "ok" }], timestamp: 2 } as Message,
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "ok" }],
+				timestamp: 2,
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+			} as Message,
 			{ role: "user", content: "second", timestamp: 3 },
-			{ role: "assistant", content: [{ type: "text", text: "ok2" }], timestamp: 4 } as Message,
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "ok2" }],
+				timestamp: 4,
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+			} as Message,
 			{ role: "user", content: "third", timestamp: 5 },
 		];
 
