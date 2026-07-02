@@ -561,7 +561,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 			let text = theme.fg("toolTitle", theme.bold("questionnaire "));
 			text += theme.fg("muted", `${count} question${count !== 1 ? "s" : ""}`);
 			if (labels) {
-				text += theme.fg("dim", ` (${truncateToWidth(labels, 40)})`);
+				text += theme.fg("dim", ` (${labels})`);
 			}
 			return new Text(text, 0, 0);
 		},

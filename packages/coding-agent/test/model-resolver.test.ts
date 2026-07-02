@@ -1,10 +1,12 @@
 import type { Model } from "@earendil-works/pi-ai";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
 	defaultModelPerProvider,
 	findInitialModel,
 	parseModelPattern,
 	resolveCliModel,
+	resolveModelScope,
+	resolveModelScopeWithDiagnostics,
 } from "../src/core/model-resolver.ts";
 
 // Mock models for testing
@@ -265,6 +267,55 @@ describe("parseModelPattern", () => {
 	});
 });
 
+describe("resolveModelScopeWithDiagnostics", () => {
+	test("returns scoped models and structured diagnostics without writing console warnings", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const registry = {
+				getAvailable: () => allModels,
+			} as unknown as Parameters<typeof resolveModelScopeWithDiagnostics>[1];
+
+			const result = await resolveModelScopeWithDiagnostics(["sonnet:high", "gpt-4o:invalid", "missing"], registry);
+
+			expect(result.scopedModels.map((scoped) => scoped.model.id)).toEqual(["claude-sonnet-4-5", "gpt-4o"]);
+			expect(result.scopedModels[0].thinkingLevel).toBe("high");
+			expect(result.scopedModels[1].thinkingLevel).toBeUndefined();
+			expect(result.diagnostics).toEqual([
+				{
+					type: "warning",
+					message: 'Invalid thinking level "invalid" in pattern "gpt-4o:invalid". Using default instead.',
+					pattern: "gpt-4o:invalid",
+				},
+				{
+					type: "warning",
+					message: 'No models match pattern "missing"',
+					pattern: "missing",
+				},
+			]);
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("resolveModelScope preserves CLI warning output", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const registry = {
+				getAvailable: () => allModels,
+			} as unknown as Parameters<typeof resolveModelScope>[1];
+
+			const scopedModels = await resolveModelScope(["missing"], registry);
+
+			expect(scopedModels).toEqual([]);
+			expect(warn).toHaveBeenCalledOnce();
+			expect(warn.mock.calls[0][0]).toContain('Warning: No models match pattern "missing"');
+		} finally {
+			warn.mockRestore();
+		}
+	});
+});
+
 describe("resolveCliModel", () => {
 	test("resolves --model provider/id without --provider", () => {
 		const registry = {
@@ -403,6 +454,7 @@ describe("resolveCliModel", () => {
 		};
 		const registry = {
 			getAll: () => [...allModels, zaiModel, gatewayModel],
+			hasConfiguredAuth: () => true,
 		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
 
 		const result = resolveCliModel({
@@ -413,6 +465,46 @@ describe("resolveCliModel", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.model?.provider).toBe("zai");
 		expect(result.model?.id).toBe("glm-5");
+	});
+
+	test("prefers an authenticated exact raw model id over an unauthenticated inferred provider", () => {
+		const commandcodeModel: Model<"anthropic-messages"> = {
+			id: "xiaomi/mimo-v2.5-pro",
+			name: "Xiaomi MiMo via Commandcode",
+			api: "anthropic-messages",
+			provider: "commandcode",
+			baseUrl: "https://example.invalid",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		};
+		const xiaomiModel: Model<"anthropic-messages"> = {
+			id: "mimo-v2.5-pro",
+			name: "Xiaomi MiMo",
+			api: "anthropic-messages",
+			provider: "xiaomi",
+			baseUrl: "https://api.xiaomimimo.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		};
+		const registry = {
+			getAll: () => [...allModels, commandcodeModel, xiaomiModel],
+			hasConfiguredAuth: (model: Model<"anthropic-messages">) => model.provider === "commandcode",
+		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+		const result = resolveCliModel({
+			cliModel: "xiaomi/mimo-v2.5-pro",
+			modelRegistry: registry,
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("commandcode");
+		expect(result.model?.id).toBe("xiaomi/mimo-v2.5-pro");
 	});
 
 	test("resolves provider-prefixed fuzzy patterns (openrouter/qwen -> openrouter model)", () => {
@@ -469,11 +561,133 @@ describe("resolveCliModel", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.model?.provider).toBe("custom-gateway");
 	});
+
+	describe("custom model fallback with :thinking suffix (#5552)", () => {
+		// Models for a provider that has registered models but the specific model ID
+		// is not in the registry (triggers buildFallbackModel path).
+		const neuralwattModel: Model<"anthropic-messages"> = {
+			id: "some-base-model",
+			name: "Some Base Model",
+			api: "anthropic-messages",
+			provider: "neuralwatt",
+			baseUrl: "https://api.neuralwatt.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		};
+
+		const modelsWithNeuralwatt = [...allModels, neuralwattModel];
+
+		test("strips :thinking suffix from custom model id in fallback path", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			const result = resolveCliModel({
+				cliModel: "neuralwatt/zai-org/GLM-5.1-FP8:high",
+				modelRegistry: registry,
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.model?.provider).toBe("neuralwatt");
+			// The :high suffix must NOT leak into the model id sent to the API
+			expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8");
+			expect(result.model?.reasoning).toBe(true);
+			expect(result.thinkingLevel).toBe("high");
+		});
+
+		test("custom model without thinking suffix works normally in fallback path", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			const result = resolveCliModel({
+				cliModel: "neuralwatt/zai-org/GLM-5.1-FP8",
+				modelRegistry: registry,
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.model?.provider).toBe("neuralwatt");
+			expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8");
+			expect(result.thinkingLevel).toBeUndefined();
+		});
+
+		test("all valid thinking levels work in fallback path", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			for (const level of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
+				const result = resolveCliModel({
+					cliModel: `neuralwatt/zai-org/GLM-5.1-FP8:${level}`,
+					modelRegistry: registry,
+				});
+
+				expect(result.error).toBeUndefined();
+				expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8");
+				expect(result.thinkingLevel).toBe(level);
+			}
+		});
+
+		test("invalid thinking suffix on custom model is treated as part of model id", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			const result = resolveCliModel({
+				cliModel: "neuralwatt/zai-org/GLM-5.1-FP8:banana",
+				modelRegistry: registry,
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.model?.provider).toBe("neuralwatt");
+			// Invalid suffix stays in the id (it's not a thinking level)
+			expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8:banana");
+			expect(result.thinkingLevel).toBeUndefined();
+		});
+
+		test("explicit --provider with custom model:thinking strips suffix correctly", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			const result = resolveCliModel({
+				cliProvider: "neuralwatt",
+				cliModel: "zai-org/GLM-5.1-FP8:high",
+				modelRegistry: registry,
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.model?.provider).toBe("neuralwatt");
+			expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8");
+			expect(result.thinkingLevel).toBe("high");
+		});
+
+		test("with explicit --thinking, :suffix is kept as part of model id", () => {
+			const registry = {
+				getAll: () => modelsWithNeuralwatt,
+			} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+			const result = resolveCliModel({
+				cliModel: "neuralwatt/zai-org/GLM-5.1-FP8:high",
+				cliThinking: "medium",
+				modelRegistry: registry,
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.model?.provider).toBe("neuralwatt");
+			// :high is kept as part of the model id since --thinking was explicit
+			expect(result.model?.id).toBe("zai-org/GLM-5.1-FP8:high");
+			expect(result.thinkingLevel).toBeUndefined();
+		});
+	});
 });
 
 describe("default model selection", () => {
 	test("openai defaults track current models", () => {
-		expect(defaultModelPerProvider.openai).toBe("gpt-5.4");
+		expect(defaultModelPerProvider.openai).toBe("gpt-5.5");
 		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.5");
 	});
 
