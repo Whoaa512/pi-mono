@@ -89,6 +89,7 @@ export interface Settings {
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
+	refusalFallbackModel?: string; // Model pattern to offer when a model refuses a request (e.g. "anthropic/claude-opus-4-5"). Prompts before switching.
 	hideThinkingBlock?: boolean;
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
@@ -814,6 +815,11 @@ export class SettingsManager {
 			maxRetries: this.settings.retry?.maxRetries ?? 3,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
 		};
+	}
+
+	getRefusalFallbackModel(): string | undefined {
+		const value = this.settings.refusalFallbackModel;
+		return value?.trim() ? value.trim() : undefined;
 	}
 
 	getHttpIdleTimeoutMs(): number {

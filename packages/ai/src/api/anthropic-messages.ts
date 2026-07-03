@@ -684,6 +684,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						if (stopReasonResult.errorMessage) {
 							output.errorMessage = stopReasonResult.errorMessage;
 						}
+						if (stopReasonResult.refused) {
+							output.refused = true;
+						}
 					}
 					// Only update usage fields if present (not null).
 					// Preserves input_tokens from message_start when proxies omit it in message_delta.
@@ -1213,7 +1216,7 @@ function convertTools(
 function mapStopReason(
 	reason: Anthropic.Messages.StopReason | string,
 	stopDetails?: RefusalStopDetails | null,
-): { stopReason: StopReason; errorMessage?: string } {
+): { stopReason: StopReason; errorMessage?: string; refused?: boolean } {
 	switch (reason) {
 		case "end_turn":
 			return { stopReason: "stop" };
@@ -1225,6 +1228,7 @@ function mapStopReason(
 			return {
 				stopReason: "error",
 				errorMessage: stopDetails?.explanation || `The model refused to complete the request`,
+				refused: true,
 			};
 		case "pause_turn": // Stop is good enough -> resubmit
 			return { stopReason: "stop" };

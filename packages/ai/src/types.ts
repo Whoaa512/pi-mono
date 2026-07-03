@@ -392,6 +392,7 @@ export interface AssistantMessage {
 	usage: Usage;
 	stopReason: StopReason;
 	errorMessage?: string;
+	refused?: boolean; // True when stopReason is "error" due to a model refusal (e.g. Anthropic stop_reason "refusal")
 	durationMs?: number;
 	timestamp: number; // Unix timestamp in milliseconds
 }

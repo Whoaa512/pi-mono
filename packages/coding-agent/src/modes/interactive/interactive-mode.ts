@@ -3056,7 +3056,45 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 			}
+
+			case "refusal_detected": {
+				await this.handleRefusalDetected(event);
+				break;
+			}
 		}
+	}
+
+	private async handleRefusalDetected(event: Extract<AgentSessionEvent, { type: "refusal_detected" }>): Promise<void> {
+		const lines = [event.errorMessage || "The model refused to complete the request."];
+		if (event.responseId) lines.push(`response id: ${event.responseId}`);
+		this.showError(lines.join("\n"));
+
+		if (!event.fallbackModel) {
+			this.showStatus('Set "refusalFallbackModel" in settings to enable one-tap downgrade on refusals.');
+			this.ui.requestRender();
+			return;
+		}
+
+		const model = this.session.resolveModelPattern(event.fallbackModel);
+		if (!model) {
+			this.showError(
+				`refusalFallbackModel "${event.fallbackModel}" did not match an available, authenticated model.`,
+			);
+			this.ui.requestRender();
+			return;
+		}
+
+		const confirmed = await this.showExtensionConfirm(
+			"Model refused",
+			`Retry this turn on ${model.provider}/${model.id}?`,
+		);
+		if (!confirmed) {
+			return;
+		}
+
+		this.showStatus(`Downgraded to ${model.provider}/${model.id} after a model refusal.`);
+		this.ui.requestRender();
+		await this.session.retryAfterRefusal(model);
 	}
 
 	/** Extract text content from a user message */

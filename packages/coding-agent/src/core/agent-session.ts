@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -84,6 +84,7 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
+import { parseModelPattern } from "./model-resolver.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -149,7 +150,14 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| {
+			type: "refusal_detected";
+			errorMessage?: string;
+			responseId?: string;
+			logPath?: string;
+			fallbackModel?: string;
+	  };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -993,6 +1001,11 @@ export class AgentSession {
 
 		if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
 			return true;
+		}
+
+		if (msg.refused) {
+			this._handleRefusal(msg);
+			return false;
 		}
 
 		if (msg.stopReason === "error" && this._retryAttempt > 0) {
@@ -2584,6 +2597,104 @@ export class AgentSession {
 	 */
 	abortRetry(): void {
 		this._retryAbortController?.abort();
+	}
+
+	/**
+	 * Handle a model refusal: persist a debug log with whatever detail the provider
+	 * exposed, then emit an informational event so the UI can offer a fallback model.
+	 * Non-blocking by design; the interactive downgrade is driven by the UI via
+	 * retryAfterRefusal().
+	 */
+	private _handleRefusal(message: AssistantMessage): void {
+		const logPath = this._writeRefusalDebugLog(message);
+		this._emit({
+			type: "refusal_detected",
+			errorMessage: message.errorMessage,
+			responseId: message.responseId,
+			logPath,
+			fallbackModel: this.settingsManager.getRefusalFallbackModel(),
+		});
+	}
+
+	/**
+	 * Write the full refused response (content, usage, ids) to a debug file next to
+	 * the session log. Returns the path, or undefined if no session file exists or the
+	 * write fails (best-effort; never throws into the agent loop).
+	 */
+	private _writeRefusalDebugLog(message: AssistantMessage): string | undefined {
+		const sessionFile = this.sessionManager.getSessionFile();
+		if (!sessionFile) {
+			return undefined;
+		}
+		try {
+			const dir = join(dirname(sessionFile), "refusals");
+			mkdirSync(dir, { recursive: true });
+			const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const logPath = join(dir, `${basename(sessionFile, ".jsonl")}_refusal_${stamp}.json`);
+			writeFileSync(
+				logPath,
+				JSON.stringify(
+					{
+						timestamp: message.timestamp,
+						provider: message.provider,
+						model: message.model,
+						responseModel: message.responseModel,
+						responseId: message.responseId,
+						stopReason: message.stopReason,
+						errorMessage: message.errorMessage,
+						usage: message.usage,
+						content: message.content,
+						diagnostics: message.diagnostics,
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+			return logPath;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * Resolve a model pattern (e.g. "anthropic/claude-opus-4-5") to a Model the current
+	 * auth can use. Returns undefined if the pattern doesn't match an authed model.
+	 */
+	resolveModelPattern(pattern: string): Model<any> | undefined {
+		const { model } = parseModelPattern(pattern, this._modelRegistry.getAvailable(), {
+			hasAuth: (provider) => this._modelRegistry.hasAuth(provider),
+		});
+		return model;
+	}
+
+	/**
+	 * After a refusal, switch to the given model and resume the turn (re-sends the last
+	 * user message under the new model). Drops the refused assistant message from agent
+	 * state so the provider doesn't see it. Emits a downgrade note into the session.
+	 */
+	async retryAfterRefusal(model: Model<any>): Promise<void> {
+		await this.setModel(model);
+
+		const messages = this.agent.state.messages;
+		if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+			this.agent.state.messages = messages.slice(0, -1);
+		}
+
+		await this._resumeAgentLoop();
+	}
+
+	/** Resume the agent loop with a continuation (no new user message). */
+	private async _resumeAgentLoop(): Promise<void> {
+		try {
+			await this.agent.continue();
+			while (await this._handlePostAgentRun()) {
+				await this.agent.continue();
+			}
+		} finally {
+			this._systemPromptOverride = undefined;
+			this._flushPendingBashMessages();
+		}
 	}
 
 	/** Whether auto-retry is currently in progress */

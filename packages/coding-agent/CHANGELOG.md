@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added model-refusal handling: on a provider refusal, the full response is written to a `refusals/` debug log next to the session file and a `refusal_detected` event is emitted. When `refusalFallbackModel` is set, interactive mode offers a one-tap downgrade that resumes the turn on the fallback model.
 - Added public SDK exports for CLI-equivalent model and scoped-model resolution ([#6201](https://github.com/earendil-works/pi/issues/6201)).
 - Added extension entry renderers for persisted display-only session entries that are rendered in interactive mode without being sent to the model context.
 
