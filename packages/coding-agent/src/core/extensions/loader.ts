@@ -670,8 +670,14 @@ export async function discoverAndLoadExtensions(
 	const addPaths = (paths: string[]) => {
 		for (const p of paths) {
 			const resolved = path.resolve(p);
-			if (!seen.has(resolved)) {
-				seen.add(resolved);
+			// Dedup by the symlink target so a symlinked extension and its target
+			// are not loaded twice (which would double-register flags/commands).
+			let key = resolved;
+			try {
+				key = fs.realpathSync(resolved);
+			} catch {}
+			if (!seen.has(key)) {
+				seen.add(key);
 				allPaths.push(p);
 			}
 		}

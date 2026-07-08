@@ -460,6 +460,23 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].flags.has("my-flag")).toBe(true);
 	});
 
+	it("dedups a discovered symlink and its explicitly configured target", async () => {
+		// Real extension lives outside the discovery dir
+		const realDir = path.join(tempDir, "real-ext");
+		fs.mkdirSync(realDir);
+		fs.writeFileSync(path.join(realDir, "index.ts"), extensionCodeWithTool("only-once"));
+
+		// Discovery dir has a symlink pointing at the real extension
+		fs.symlinkSync(realDir, path.join(extensionsDir, "linked-ext"));
+
+		// ...and the same target is also passed as an explicit path
+		const result = await discoverAndLoadExtensions([path.join(realDir, "index.ts")], tempDir, tempDir);
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.extensions).toHaveLength(1);
+		expect(result.extensions[0].tools.has("only-once")).toBe(true);
+	});
+
 	it("loadExtensions only loads explicit paths without discovery", async () => {
 		// Create discoverable extensions (would be found by discoverAndLoadExtensions)
 		fs.writeFileSync(path.join(extensionsDir, "discovered.ts"), extensionCodeWithTool("discovered"));
