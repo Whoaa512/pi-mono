@@ -132,6 +132,7 @@ export type AgentSessionEvent =
 			messages: AgentMessage[];
 			willRetry: boolean;
 	  }
+	| { type: "agent_settled" }
 	| {
 			type: "queue_update";
 			steering: readonly string[];
@@ -173,7 +174,7 @@ export interface AgentSessionConfig {
 	cwd: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
-	/** Resource loader for skills, prompts, themes, context files, system prompt */
+	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
 	/** SDK custom tools registered outside extensions */
 	customTools?: ToolDefinition[];
@@ -283,6 +284,9 @@ export class AgentSession {
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
+	private _isAgentRunActive = false;
+	private _idleWaitPromise: Promise<void> | undefined;
+	private _resolveIdleWait: (() => void) | undefined;
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -516,6 +520,35 @@ export class AgentSession {
 		});
 	}
 
+	private _getIdleWaitPromise(): Promise<void> {
+		if (!this._idleWaitPromise) {
+			this._idleWaitPromise = new Promise((resolve) => {
+				this._resolveIdleWait = resolve;
+			});
+		}
+		return this._idleWaitPromise;
+	}
+
+	private _resolveIdleWaitIfIdle(): void {
+		if (this._isAgentRunActive || !this._resolveIdleWait) {
+			return;
+		}
+		const resolve = this._resolveIdleWait;
+		this._idleWaitPromise = undefined;
+		this._resolveIdleWait = undefined;
+		resolve();
+	}
+
+	private async _emitAgentSettled(): Promise<void> {
+		this._isAgentRunActive = false;
+		try {
+			await this._extensionRunner.emit({ type: "agent_settled" });
+			this._emit({ type: "agent_settled" });
+		} finally {
+			this._resolveIdleWaitIfIdle();
+		}
+	}
+
 	// Track last assistant message for auto-compaction check
 	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
 
@@ -688,7 +721,17 @@ export class AgentSession {
 			};
 			const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
 			if (replacement) {
-				this._replaceMessageInPlace(event.message, replacement);
+				// Untyped extension handlers can return messages with null/missing content;
+				// normalize so it never enters agent state or session history.
+				const normalized =
+					(replacement.role === "user" ||
+						replacement.role === "assistant" ||
+						replacement.role === "toolResult" ||
+						replacement.role === "custom") &&
+					replacement.content == null
+						? ({ ...replacement, content: [] } as AgentMessage)
+						: replacement;
+				this._replaceMessageInPlace(event.message, normalized);
 			}
 		} else if (event.type === "tool_execution_start") {
 			const extensionEvent: ToolExecutionStartEvent = {
@@ -799,9 +842,14 @@ export class AgentSession {
 		return this.agent.state.thinkingLevel;
 	}
 
-	/** Whether agent is currently streaming a response */
+	/** Whether the session is currently processing an agent run or post-run continuation. */
 	get isStreaming(): boolean {
-		return this.agent.state.isStreaming;
+		return this._isAgentRunActive;
+	}
+
+	/** Whether the session has no active agent run, retry, auto-compaction, or queued continuation. */
+	get isIdle(): boolean {
+		return !this._isAgentRunActive;
 	}
 
 	/** Current effective system prompt (includes any per-turn extension modifications) */
@@ -981,6 +1029,7 @@ export class AgentSession {
 	// =========================================================================
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+		this._isAgentRunActive = true;
 		try {
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
@@ -989,6 +1038,7 @@ export class AgentSession {
 		} finally {
 			this._systemPromptOverride = undefined;
 			this._flushPendingBashMessages();
+			await this._emitAgentSettled();
 		}
 	}
 
@@ -1156,7 +1206,8 @@ export class AgentSession {
 					messages.push({
 						role: "custom",
 						customType: msg.customType,
-						content: msg.content,
+						// Untyped extensions can pass null/missing content; normalize at ingestion.
+						content: msg.content ?? [],
 						display: msg.display,
 						details: msg.details,
 						timestamp: Date.now(),
@@ -1354,7 +1405,8 @@ export class AgentSession {
 		const appMessage = {
 			role: "custom" as const,
 			customType: message.customType,
-			content: message.content,
+			// Untyped extensions can pass null/missing content; normalize at ingestion.
+			content: message.content ?? [],
 			display: message.display,
 			details: message.details,
 			timestamp: Date.now(),
@@ -1462,7 +1514,14 @@ export class AgentSession {
 	async abort(): Promise<void> {
 		this.abortRetry();
 		this.agent.abort();
-		await this.agent.waitForIdle();
+		await this.waitForIdle();
+	}
+
+	async waitForIdle(): Promise<void> {
+		if (this.isIdle) {
+			return;
+		}
+		await this._getIdleWaitPromise();
 	}
 
 	// =========================================================================
@@ -2306,7 +2365,7 @@ export class AgentSession {
 			},
 			{
 				getModel: () => this.model,
-				isIdle: () => !this.isStreaming,
+				isIdle: () => this.isIdle,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this.agent.signal,
 				abort: () => {
@@ -3070,14 +3129,15 @@ export class AgentSession {
 	}
 
 	/**
-	 * Get session statistics.
+	 * Get session statistics. Aggregates over ALL session entries (including
+	 * history that was compacted away), so token/cost totals reflect what was
+	 * actually billed across the session.
 	 */
 	getSessionStats(): SessionStats {
-		const state = this.state;
-		const userMessages = state.messages.filter((m) => m.role === "user").length;
-		const assistantMessages = state.messages.filter((m) => m.role === "assistant").length;
-		const toolResults = state.messages.filter((m) => m.role === "toolResult").length;
-
+		let userMessages = 0;
+		let assistantMessages = 0;
+		let toolResults = 0;
+		let totalMessages = 0;
 		let toolCalls = 0;
 		let totalInput = 0;
 		let totalOutput = 0;
@@ -3085,15 +3145,26 @@ export class AgentSession {
 		let totalCacheWrite = 0;
 		let totalCost = 0;
 
-		for (const message of state.messages) {
-			if (message.role === "assistant") {
+		for (const entry of this.sessionManager.getEntries()) {
+			if (entry.type !== "message") continue;
+			totalMessages++;
+			const message = entry.message;
+			if (message.role === "user") {
+				userMessages++;
+			} else if (message.role === "toolResult") {
+				toolResults++;
+			} else if (message.role === "assistant") {
+				assistantMessages++;
 				const assistantMsg = message as AssistantMessage;
-				toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-				totalInput += assistantMsg.usage.input;
-				totalOutput += assistantMsg.usage.output;
-				totalCacheRead += assistantMsg.usage.cacheRead;
-				totalCacheWrite += assistantMsg.usage.cacheWrite;
-				totalCost += assistantMsg.usage.cost.total;
+				if (Array.isArray(assistantMsg.content)) {
+					toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
+				}
+				const usage = assistantMsg.usage;
+				totalInput += usage.input;
+				totalOutput += usage.output;
+				totalCacheRead += usage.cacheRead;
+				totalCacheWrite += usage.cacheWrite;
+				totalCost += usage.cost.total;
 			}
 		}
 
@@ -3104,7 +3175,7 @@ export class AgentSession {
 			assistantMessages,
 			toolCalls,
 			toolResults,
-			totalMessages: state.messages.length,
+			totalMessages,
 			tokens: {
 				input: totalInput,
 				output: totalOutput,

@@ -66,6 +66,7 @@ export default function question(pi: ExtensionAPI) {
 		label: "Question",
 		description: "Ask the user a question and let them pick from options. Use when you need user input to proceed.",
 		parameters: QuestionParams,
+		executionMode: "sequential",
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// Guard on hasUI (true in TUI and RPC-with-host modes like Supacode), not mode==="tui".
