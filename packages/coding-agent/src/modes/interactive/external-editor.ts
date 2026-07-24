@@ -6,6 +6,7 @@ import { join } from "node:path";
 export interface ExternalEditorOptions {
 	command: string;
 	content: string;
+	confirmFastExit?: boolean;
 }
 
 export type ExternalEditorResult = { status: "complete"; content: string } | { status: "failed" };
@@ -31,7 +32,7 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 			child.on("close", (code) => resolve(code));
 		});
 
-		if (exitCode === 0 && Date.now() - startedAt < 1500) {
+		if (options.confirmFastExit && exitCode === 0 && Date.now() - startedAt < 1500) {
 			spawnSync("bash", ["-c", 'read -p "\nPress Enter when done editing..."'], { stdio: "inherit" });
 		}
 

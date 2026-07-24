@@ -3891,6 +3891,7 @@ export class InteractiveMode {
 			const result = await editInExternalEditor({
 				command: editorCmd,
 				content,
+				confirmFastExit: true,
 			});
 			if (result.status === "complete") {
 				this.editor.setText(result.content);

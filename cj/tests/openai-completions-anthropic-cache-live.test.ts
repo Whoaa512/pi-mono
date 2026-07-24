@@ -73,7 +73,12 @@ describe.skipIf(!LIVE)("openai-completions anthropic cache_control (live)", () =
 		const assistantText = r1.content.find((c) => c.type === "text")?.text ?? "ok";
 		const turn2: Message[] = [
 			...turn1,
-			{ role: "assistant", content: [{ type: "text", text: assistantText }], timestamp: Date.now() } as Message,
+			{
+				role: "assistant",
+				content: [{ type: "text", text: assistantText }],
+				usage: r1.usage,
+				timestamp: Date.now(),
+			} as Message,
 			{ role: "user", content: "Now say goodbye in 3 words.", timestamp: Date.now() },
 		];
 

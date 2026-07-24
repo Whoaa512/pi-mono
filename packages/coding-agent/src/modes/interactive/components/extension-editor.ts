@@ -120,6 +120,7 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			const result = await editInExternalEditor({
 				command: this.externalEditorCommand,
 				content,
+				confirmFastExit: true,
 			});
 			if (result.status === "complete") {
 				this.editor.setText(result.content);
