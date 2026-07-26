@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -368,6 +368,99 @@ Content`,
 			const shared = agentsFiles.filter((f) => f.content.includes("Shared instructions."));
 			expect(shared).toHaveLength(1);
 			expect(shared[0].path).toBe(join(agentDir, "AGENTS.md"));
+		});
+
+		it("should expand @-imports in context files", async () => {
+			const sibling = join(cwd, "docs");
+			mkdirSync(sibling, { recursive: true });
+			writeFileSync(join(sibling, "nested.md"), "NESTED_CONTENT");
+			writeFileSync(join(sibling, "relative.md"), "RELATIVE_CONTENT @./nested.md");
+			const absoluteTarget = join(tempDir, "absolute.md");
+			writeFileSync(absoluteTarget, "ABSOLUTE_CONTENT");
+			writeFileSync(
+				join(cwd, "AGENTS.md"),
+				["@./docs/relative.md", `@${absoluteTarget}`, "@/definitely/missing/file.md"].join("\n"),
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+			expect(content).toContain("RELATIVE_CONTENT");
+			expect(content).toContain("NESTED_CONTENT");
+			expect(content).toContain("ABSOLUTE_CONTENT");
+			expect(content).toContain("@/definitely/missing/file.md");
+		});
+
+		it("should expand ~/ imports in context files", async () => {
+			const homeTarget = join(homedir(), `.pi-import-test-${Date.now()}.md`);
+			writeFileSync(homeTarget, "HOME_CONTENT");
+			try {
+				writeFileSync(join(cwd, "AGENTS.md"), `@~/${basename(homeTarget)}`);
+
+				const loader = new DefaultResourceLoader({ cwd, agentDir });
+				await loader.reload();
+
+				const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+				expect(content).toContain("HOME_CONTENT");
+			} finally {
+				rmSync(homeTarget, { force: true });
+			}
+		});
+
+		it("should stop expanding imports after 5 hops", async () => {
+			for (let i = 1; i <= 7; i++) {
+				writeFileSync(join(cwd, `hop${i}.md`), `HOP_${i} @./hop${i + 1}.md`);
+			}
+			writeFileSync(join(cwd, "AGENTS.md"), "@./hop1.md");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+			for (let i = 1; i <= 5; i++) {
+				expect(content).toContain(`HOP_${i}`);
+			}
+			expect(content).not.toContain("HOP_6");
+			expect(content).toContain("@./hop6.md");
+		});
+
+		it("should not loop on cyclic imports", async () => {
+			writeFileSync(join(cwd, "a.md"), "A_CONTENT @./b.md");
+			writeFileSync(join(cwd, "b.md"), "B_CONTENT @./a.md");
+			writeFileSync(join(cwd, "AGENTS.md"), "@./a.md");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+			expect(content).toContain("A_CONTENT");
+			expect(content).toContain("B_CONTENT");
+			expect(content).toContain("@./a.md");
+			expect(content?.match(/A_CONTENT/g)).toHaveLength(1);
+		});
+
+		it("should not expand imports inside code fences or inline code", async () => {
+			writeFileSync(join(cwd, "secret.md"), "SHOULD_NOT_APPEAR");
+			writeFileSync(
+				join(cwd, "AGENTS.md"),
+				[
+					"```bash",
+					"cat @./secret.md",
+					"```",
+					"inline `@./secret.md` reference",
+					"~~~",
+					"@./secret.md",
+					"~~~",
+				].join("\n"),
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+			expect(content).not.toContain("SHOULD_NOT_APPEAR");
+			expect(content?.match(/@\.\/secret\.md/g)).toHaveLength(3);
 		});
 
 		it("should skip AGENTS.md and CLAUDE.md discovery when noContextFiles is true", async () => {

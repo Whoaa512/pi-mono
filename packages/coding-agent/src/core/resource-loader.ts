@@ -65,15 +65,103 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
+/** Max number of `@import` hops followed from a context file, matching Claude Code. */
+const MAX_CONTEXT_IMPORT_DEPTH = 5;
+
+/** `@` followed by a whitespace-free token containing a path separator. */
+const CONTEXT_IMPORT_PATTERN = /(^|\s)@(?=[^\s]*\/)([^\s]+)/g;
+
+/** Inline code spans, captured so they can be skipped during expansion. */
+const INLINE_CODE_PATTERN = /(`+[^`]*`+)/;
+
+function expandContextImports(
+	content: string,
+	containingDir: string,
+	depth: number,
+	chain: Set<string>,
+	warned: Set<string>,
+): string {
+	if (depth >= MAX_CONTEXT_IMPORT_DEPTH) {
+		return content;
+	}
+
+	let fenceMarker: string | undefined;
+	const lines = content.split("\n").map((line) => {
+		const fence = line.trimStart().match(/^(```+|~~~+)/);
+		if (fence) {
+			const marker = fence[1][0];
+			if (!fenceMarker) {
+				fenceMarker = marker;
+			} else if (fenceMarker === marker) {
+				fenceMarker = undefined;
+			}
+			return line;
+		}
+		if (fenceMarker) {
+			return line;
+		}
+		return line
+			.split(INLINE_CODE_PATTERN)
+			.map((segment, index) =>
+				index % 2 === 1 ? segment : expandImportsInText(segment, containingDir, depth, chain, warned),
+			)
+			.join("");
+	});
+
+	return lines.join("\n");
+}
+
+function expandImportsInText(
+	text: string,
+	containingDir: string,
+	depth: number,
+	chain: Set<string>,
+	warned: Set<string>,
+): string {
+	return text.replace(CONTEXT_IMPORT_PATTERN, (match, prefix: string, reference: string) => {
+		if (reference.includes("://")) {
+			return match;
+		}
+
+		const importPath = resolvePath(reference, containingDir);
+		const realPath = canonicalizePath(importPath);
+		if (chain.has(realPath)) {
+			return match;
+		}
+
+		let imported: string;
+		try {
+			imported = readFileSync(importPath, "utf-8");
+		} catch (error) {
+			if (!warned.has(realPath)) {
+				warned.add(realPath);
+				console.error(chalk.yellow(`Warning: Could not read imported context file ${importPath}: ${error}`));
+			}
+			return match;
+		}
+
+		const nestedChain = new Set(chain);
+		nestedChain.add(realPath);
+		return prefix + expandContextImports(imported, dirname(importPath), depth + 1, nestedChain, warned);
+	});
+}
+
+function loadContextFileFromDir(dir: string, warned: Set<string>): { path: string; content: string } | null {
 	const candidates = ["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
 			try {
+				const content = readFileSync(filePath, "utf-8");
 				return {
 					path: filePath,
-					content: readFileSync(filePath, "utf-8"),
+					content: expandContextImports(
+						content,
+						dirname(canonicalizePath(filePath)),
+						0,
+						new Set([canonicalizePath(filePath)]),
+						warned,
+					),
 				};
 			} catch (error) {
 				console.error(chalk.yellow(`Warning: Could not read ${filePath}: ${error}`));
@@ -92,16 +180,17 @@ export function loadProjectContextFiles(options: {
 
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
+	const warnedImports = new Set<string>();
 
 	// Check ~/.claude/ for CLAUDE.md (Claude Code compatibility)
 	const claudeDir = join(homedir(), ".claude");
-	const claudeContext = loadContextFileFromDir(claudeDir);
+	const claudeContext = loadContextFileFromDir(claudeDir, warnedImports);
 	if (claudeContext) {
 		contextFiles.push(claudeContext);
 		seenPaths.add(canonicalizePath(claudeContext.path));
 	}
 
-	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+	const globalContext = loadContextFileFromDir(resolvedAgentDir, warnedImports);
 	if (globalContext && !seenPaths.has(canonicalizePath(globalContext.path))) {
 		contextFiles.push(globalContext);
 		seenPaths.add(canonicalizePath(globalContext.path));
@@ -112,7 +201,7 @@ export function loadProjectContextFiles(options: {
 	let currentDir = resolvedCwd;
 
 	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir);
+		const contextFile = loadContextFileFromDir(currentDir, warnedImports);
 		if (contextFile && !seenPaths.has(canonicalizePath(contextFile.path))) {
 			ancestorContextFiles.unshift(contextFile);
 			seenPaths.add(canonicalizePath(contextFile.path));
