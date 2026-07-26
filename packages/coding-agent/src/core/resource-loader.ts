@@ -98,13 +98,13 @@ export function loadProjectContextFiles(options: {
 	const claudeContext = loadContextFileFromDir(claudeDir);
 	if (claudeContext) {
 		contextFiles.push(claudeContext);
-		seenPaths.add(claudeContext.path);
+		seenPaths.add(canonicalizePath(claudeContext.path));
 	}
 
 	const globalContext = loadContextFileFromDir(resolvedAgentDir);
-	if (globalContext) {
+	if (globalContext && !seenPaths.has(canonicalizePath(globalContext.path))) {
 		contextFiles.push(globalContext);
-		seenPaths.add(globalContext.path);
+		seenPaths.add(canonicalizePath(globalContext.path));
 	}
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
@@ -113,9 +113,9 @@ export function loadProjectContextFiles(options: {
 
 	while (true) {
 		const contextFile = loadContextFileFromDir(currentDir);
-		if (contextFile && !seenPaths.has(contextFile.path)) {
+		if (contextFile && !seenPaths.has(canonicalizePath(contextFile.path))) {
 			ancestorContextFiles.unshift(contextFile);
-			seenPaths.add(contextFile.path);
+			seenPaths.add(canonicalizePath(contextFile.path));
 		}
 
 		const parentDir = dirname(currentDir);

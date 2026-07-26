@@ -355,6 +355,21 @@ Content`,
 			expect(agentsFiles.some((f) => f.path.includes("AGENTS.md"))).toBe(true);
 		});
 
+		it("should load a context file once when two paths symlink to the same file", async () => {
+			const sharedContext = join(tempDir, "shared-context.md");
+			writeFileSync(sharedContext, "# Shared\n\nShared instructions.");
+			symlinkSync(sharedContext, join(agentDir, "AGENTS.md"), "file");
+			symlinkSync(sharedContext, join(cwd, "AGENTS.md"), "file");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			const shared = agentsFiles.filter((f) => f.content.includes("Shared instructions."));
+			expect(shared).toHaveLength(1);
+			expect(shared[0].path).toBe(join(agentDir, "AGENTS.md"));
+		});
+
 		it("should skip AGENTS.md and CLAUDE.md discovery when noContextFiles is true", async () => {
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 			writeFileSync(join(cwd, "CLAUDE.md"), "# Claude Guidelines\n\nBe helpful.");
