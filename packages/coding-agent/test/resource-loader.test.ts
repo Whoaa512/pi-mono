@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ExtensionRunner } from "../src/core/extensions/runner.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
@@ -390,6 +390,30 @@ Content`,
 			expect(content).toContain("NESTED_CONTENT");
 			expect(content).toContain("ABSOLUTE_CONTENT");
 			expect(content).toContain("@/definitely/missing/file.md");
+		});
+
+		it("should leave directory and package-name references literal without warning", async () => {
+			const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+			try {
+				mkdirSync(join(cwd, "notes"), { recursive: true });
+				writeFileSync(
+					join(cwd, "AGENTS.md"),
+					[
+						`store notes in the @${join(cwd, "notes")} directory`,
+						"use tsgo provided by @typescript/native-preview",
+					].join("\n"),
+				);
+
+				const loader = new DefaultResourceLoader({ cwd, agentDir });
+				await loader.reload();
+
+				const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
+				expect(content).toContain(`@${join(cwd, "notes")}`);
+				expect(content).toContain("@typescript/native-preview");
+				expect(warn).not.toHaveBeenCalled();
+			} finally {
+				warn.mockRestore();
+			}
 		});
 
 		it("should expand ~/ imports in context files", async () => {

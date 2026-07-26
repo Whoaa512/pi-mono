@@ -111,6 +111,14 @@ function expandContextImports(
 	return lines.join("\n");
 }
 
+function isReadableFile(filePath: string): boolean {
+	try {
+		return statSync(filePath).isFile();
+	} catch {
+		return false;
+	}
+}
+
 function expandImportsInText(
 	text: string,
 	containingDir: string,
@@ -126,6 +134,13 @@ function expandImportsInText(
 		const importPath = resolvePath(reference, containingDir);
 		const realPath = canonicalizePath(importPath);
 		if (chain.has(realPath)) {
+			return match;
+		}
+
+		// Prose and scoped package names look like imports (`@typescript/native-preview`,
+		// "the @/some/dir directory"). Only a real file is an import; anything else stays literal
+		// and stays quiet, or every session warns about ordinary text.
+		if (!isReadableFile(importPath)) {
 			return match;
 		}
 
