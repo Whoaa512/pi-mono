@@ -77,6 +77,7 @@ import {
 	type MessageStartEvent,
 	type MessageUpdateEvent,
 	type ReplacedSessionContext,
+	type RetryEvent,
 	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
 	type SessionStartEvent,
@@ -770,6 +771,15 @@ export class AgentSession {
 						: replacement;
 				this._replaceMessageInPlace(event.message, normalized);
 			}
+		} else if (event.type === "retry") {
+			const extensionEvent: RetryEvent = {
+				type: "retry",
+				attempt: event.attempt,
+				maxRetries: event.maxRetries,
+				delayMs: event.delayMs,
+				errorMessage: event.errorMessage,
+			};
+			await this._extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_start") {
 			const extensionEvent: ToolExecutionStartEvent = {
 				type: "tool_execution_start",

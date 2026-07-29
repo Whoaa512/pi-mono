@@ -755,6 +755,17 @@ export interface MessageEndEvent {
 	message: AgentMessage;
 }
 
+/** Fired when a provider request failed and is about to be retried after a backoff delay */
+export interface RetryEvent {
+	type: "retry";
+	/** 1-based retry number. */
+	attempt: number;
+	maxRetries: number;
+	/** Backoff delay before the next attempt starts. */
+	delayMs: number;
+	errorMessage: string;
+}
+
 /** Fired when a tool starts executing */
 export interface ToolExecutionStartEvent {
 	type: "tool_execution_start";
@@ -1045,6 +1056,7 @@ export type ExtensionEvent =
 	| MessageStartEvent
 	| MessageUpdateEvent
 	| MessageEndEvent
+	| RetryEvent
 	| ToolExecutionStartEvent
 	| ToolExecutionUpdateEvent
 	| ToolExecutionEndEvent
@@ -1215,6 +1227,7 @@ export interface ExtensionAPI {
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): void;
 	on(event: "message_update", handler: ExtensionHandler<MessageUpdateEvent>): void;
 	on(event: "message_end", handler: ExtensionHandler<MessageEndEvent, MessageEndEventResult>): void;
+	on(event: "retry", handler: ExtensionHandler<RetryEvent>): void;
 	on(event: "tool_execution_start", handler: ExtensionHandler<ToolExecutionStartEvent>): void;
 	on(event: "tool_execution_update", handler: ExtensionHandler<ToolExecutionUpdateEvent>): void;
 	on(event: "tool_execution_end", handler: ExtensionHandler<ToolExecutionEndEvent>): void;

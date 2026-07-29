@@ -439,6 +439,17 @@ export class Agent {
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
 			onResponse: this.onResponse,
+			// Awaited by the provider before its backoff sleep so listeners stay serialized
+			// with the surrounding event stream.
+			onRetry: async (info) => {
+				await this.processEvents({
+					type: "retry",
+					attempt: info.attempt,
+					maxRetries: info.maxRetries,
+					delayMs: info.delayMs,
+					errorMessage: info.error.message,
+				});
+			},
 			transport: this.transport,
 			thinkingBudgets: this.thinkingBudgets,
 			maxRetryDelayMs: this.maxRetryDelayMs,

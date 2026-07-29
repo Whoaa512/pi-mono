@@ -5,6 +5,7 @@
 ### Added
 
 - Added `ANTHROPIC_AUTH_TOKEN` bearer authentication for Anthropic-compatible gateways ([#5871](https://github.com/earendil-works/pi/issues/5871))
+- Added `StreamOptions.onRetry`, awaited before each client-side retry backoff with the attempt number, retry limit, delay, and error (wired for Anthropic Messages, OpenAI Completions, OpenAI Responses, and Azure OpenAI Responses)
 
 ### Changed
 

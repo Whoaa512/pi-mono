@@ -431,6 +431,8 @@ export type AgentEvent =
 	// Only emitted for assistant messages during streaming
 	| { type: "message_update"; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
 	| { type: "message_end"; message: AgentMessage }
+	// Provider-level retry: emitted before the client-side backoff sleep of a retried request
+	| { type: "retry"; attempt: number; maxRetries: number; delayMs: number; errorMessage: string }
 	// Tool execution lifecycle
 	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
 	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any }

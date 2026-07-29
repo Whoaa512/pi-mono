@@ -621,6 +621,16 @@ pi.on("message_end", async (event, ctx) => {
 });
 ```
 
+#### retry
+
+Fired when a provider request failed with a retryable error and the client is about to sleep before the next attempt.
+
+```typescript
+pi.on("retry", async (event, ctx) => {
+  // event.attempt (1-based), event.maxRetries, event.delayMs, event.errorMessage
+});
+```
+
 #### tool_execution_start / tool_execution_update / tool_execution_end
 
 Fired for tool execution lifecycle updates.

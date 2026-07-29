@@ -4,6 +4,8 @@ interface ProviderRetryOptions {
 	maxRetries?: number;
 	maxRetryDelayMs?: number;
 	signal?: AbortSignal;
+	/** Awaited right before each backoff sleep. Callback failures are swallowed. */
+	onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; error: Error }) => void | Promise<void>;
 }
 
 interface ProviderError extends Error {
@@ -119,7 +121,13 @@ export async function retryProviderRequest<T>(
 
 			const retryIndex = maxRetries - retriesRemaining;
 			retriesRemaining--;
-			await abortableSleep(getRetryDelayMs(error, retryIndex, options.maxRetryDelayMs), options.signal);
+			const delayMs = getRetryDelayMs(error, retryIndex, options.maxRetryDelayMs);
+			try {
+				await options.onRetry?.({ attempt: retryIndex + 1, maxRetries, delayMs, error });
+			} catch {
+				// A broken observer must never break the retry loop.
+			}
+			await abortableSleep(delayMs, options.signal);
 		}
 	}
 }

@@ -144,6 +144,13 @@ export interface StreamOptions {
 	 */
 	onResponse?: (response: ProviderResponse, model: Model<Api>) => void | Promise<void>;
 	/**
+	 * Optional callback invoked right before the client-side retry backoff sleep,
+	 * for providers that use the shared retry helper. `attempt` is the 1-based
+	 * retry number and `delayMs` is how long the backoff will wait. The callback is
+	 * awaited before the sleep starts; failures are swallowed.
+	 */
+	onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; error: Error }) => void | Promise<void>;
+	/**
 	 * Optional custom HTTP headers to include in API requests.
 	 * Merged with provider defaults; caller values override default headers.
 	 * On AWS Bedrock these are injected via a Smithy `build`-step middleware so

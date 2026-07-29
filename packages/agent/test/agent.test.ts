@@ -103,6 +103,34 @@ describe("Agent", () => {
 		}
 	});
 
+	it("emits a retry event when the stream function reports a provider retry", async () => {
+		const agent = new Agent({
+			streamFn: (_model, _context, options) => {
+				const stream = new MockAssistantStream();
+				void (async () => {
+					// Providers await onRetry before their backoff sleep.
+					await options?.onRetry?.({ attempt: 2, maxRetries: 5, delayMs: 8000, error: new Error("overloaded") });
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+				})();
+				return stream;
+			},
+		});
+		const retryEvents: Extract<AgentEvent, { type: "retry" }>[] = [];
+		const eventTypes: AgentEvent["type"][] = [];
+		agent.subscribe((event) => {
+			eventTypes.push(event.type);
+			if (event.type === "retry") retryEvents.push(event);
+		});
+
+		await agent.prompt("hello");
+		await agent.waitForIdle();
+
+		expect(retryEvents).toEqual([
+			{ type: "retry", attempt: 2, maxRetries: 5, delayMs: 8000, errorMessage: "overloaded" },
+		]);
+		expect(eventTypes.indexOf("retry")).toBeLessThan(eventTypes.indexOf("agent_end"));
+	});
+
 	it("should create an agent instance with default state", () => {
 		const agent = new Agent({ streamFn: unusedStreamFunction });
 

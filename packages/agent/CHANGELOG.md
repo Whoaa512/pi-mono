@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a `retry` agent event, emitted when a provider request fails and is about to be retried after a backoff delay
+
 ## [0.82.0] - 2026-07-24
 
 ### Breaking Changes

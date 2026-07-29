@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added request-lifecycle feedback to the working spinner: it shows "Waiting for response..." until the first provider bytes arrive, then "Working...", and a countdown with the error reason while a provider retry backs off
+- Added a `retry` extension event (`pi.on("retry", ...)`) for provider retries. Retry feedback only covers providers that use the shared retry helper (Anthropic Messages, OpenAI Completions, OpenAI Responses, Azure OpenAI Responses); other providers still show "Waiting for response..." while they retry
+
 ### Fixed
 
 - Fixed compaction and branch summaries for providers whose authentication resolves entirely to request headers ([#5871](https://github.com/earendil-works/pi/issues/5871))

@@ -116,6 +116,7 @@ export type {
 	RegisteredCommand,
 	RegisteredTool,
 	ResolvedCommand,
+	RetryEvent,
 	SessionBeforeCompactEvent,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,

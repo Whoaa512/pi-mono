@@ -121,6 +121,8 @@ export type {
 	// Events - Resources
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
+	// Events - Retry
+	RetryEvent,
 	SendMessageHandler,
 	SendUserMessageHandler,
 	SessionBeforeCompactEvent,
