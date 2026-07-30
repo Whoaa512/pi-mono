@@ -11,6 +11,7 @@ import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import { markTiming } from "../timings.ts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -797,6 +798,9 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const handlerResult = await handler(event, ctx);
+					if (event.type === "session_shutdown") {
+						markTiming(`  handler[${event.type}]: ${ext.path}`);
+					}
 
 					if (this.isSessionBeforeEvent(event) && handlerResult) {
 						result = handlerResult as SessionBeforeEventResult;

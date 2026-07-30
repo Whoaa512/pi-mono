@@ -3,6 +3,10 @@
  * Enable with PI_TIMING=1 environment variable.
  */
 
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { getAgentDir } from "../config.ts";
+
 const ENABLED = process.env.PI_TIMING === "1";
 interface TimingNamespace {
 	timings: Array<{ label: string; ms: number }>;
@@ -47,4 +51,42 @@ export function printTimings(): void {
 	for (const [namespace, timingNamespace] of timingNamespaces) {
 		printTimingGroup(`Startup Timings: ${namespace}`, timingNamespace.timings);
 	}
+}
+
+/**
+ * File-backed timing sections for in-TUI operations (e.g. /new) where
+ * stderr output is not visible. Appends to <agentDir>/timings.log.
+ * markTiming() is a no-op unless a section is active, so instrumented
+ * code paths cost nothing during normal startup.
+ */
+let activeSection: { title: string; lines: string[]; start: number; last: number } | null = null;
+
+export function beginTimingSection(title: string): void {
+	if (!ENABLED) return;
+	const now = performance.now();
+	activeSection = { title, lines: [], start: now, last: now };
+}
+
+export function markTiming(label: string): void {
+	if (!activeSection) return;
+	const now = performance.now();
+	activeSection.lines.push(`  ${label}: ${(now - activeSection.last).toFixed(1)}ms`);
+	activeSection.last = now;
+}
+
+export function endTimingSection(): void {
+	if (!activeSection) return;
+	const total = performance.now() - activeSection.start;
+	const agentDir = getAgentDir();
+	mkdirSync(agentDir, { recursive: true });
+	appendFileSync(
+		join(agentDir, "timings.log"),
+		[
+			`=== ${activeSection.title} @ ${new Date().toISOString()} ===`,
+			...activeSection.lines,
+			`  TOTAL: ${total.toFixed(1)}ms`,
+			"",
+		].join("\n"),
+	);
+	activeSection = null;
 }

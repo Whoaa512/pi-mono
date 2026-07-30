@@ -13,6 +13,7 @@ import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { SessionManager } from "./session-manager.ts";
+import { beginTimingSection, endTimingSection, markTiming } from "./timings.ts";
 
 /**
  * Result returned by runtime creation.
@@ -170,8 +171,10 @@ export class AgentSessionRuntime {
 			reason,
 			targetSessionFile,
 		});
+		markTiming("teardown: session_shutdown events");
 		this.beforeSessionInvalidate?.();
 		this.session.dispose();
+		markTiming("teardown: session.dispose");
 	}
 
 	private apply(result: CreateAgentSessionRuntimeResult): void {
@@ -225,8 +228,11 @@ export class AgentSessionRuntime {
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
+		beginTimingSection("newSession (/new)");
 		const beforeResult = await this.emitBeforeSwitch("new");
+		markTiming("emitBeforeSwitch");
 		if (beforeResult.cancelled) {
+			endTimingSection();
 			return beforeResult;
 		}
 
@@ -238,8 +244,10 @@ export class AgentSessionRuntime {
 		if (options?.parentSession) {
 			sessionManager.newSession({ parentSession: options.parentSession });
 		}
+		markTiming("sessionManager.create");
 
 		await this.teardownCurrent("new", sessionManager.getSessionFile());
+		markTiming("teardownCurrent");
 		this.apply(
 			await this.createRuntime({
 				cwd: this.cwd,
@@ -248,11 +256,15 @@ export class AgentSessionRuntime {
 				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
 			}),
 		);
+		markTiming("createRuntime (rest)");
 		if (options?.setup) {
 			await options.setup(this.session.sessionManager);
 			this.session.agent.state.messages = this.session.sessionManager.buildSessionContext().messages;
+			markTiming("setup");
 		}
 		await this.finishSessionReplacement(options?.withSession);
+		markTiming("finishSessionReplacement");
+		endTimingSection();
 		return { cancelled: false };
 	}
 

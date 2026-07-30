@@ -39,7 +39,7 @@ import {
 } from "./core/session-cwd.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
-import { printTimings, resetTimings, time } from "./core/timings.ts";
+import { markTiming, printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { builtInExtensions } from "./extensions/index.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
@@ -700,6 +700,7 @@ export async function main(args: string[], options?: MainOptions) {
 				extensionFactories,
 			},
 		});
+		markTiming("factory: createAgentSessionServices");
 		const { settingsManager, modelRuntime, resourceLoader } = services;
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
 			...projectTrustDiagnostics,
@@ -726,6 +727,7 @@ export async function main(args: string[], options?: MainOptions) {
 			settingsManager,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
+		markTiming("factory: buildSessionOptions");
 
 		if (parsed.apiKey) {
 			if (!sessionOptions.model) {
@@ -751,6 +753,7 @@ export async function main(args: string[], options?: MainOptions) {
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
 		});
+		markTiming("factory: createAgentSessionFromServices");
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
 			created.session.setThinkingLevel(created.session.thinkingLevel);
