@@ -299,7 +299,10 @@ async function runSingleAgent(
 		};
 	}
 
-	const args: string[] = ["--mode", "json", "-p"];
+	// Persist subagent sessions for accounting/mining, but in a sibling dir so
+	// they never appear in the interactive resume picker (which scans the default dir).
+	const subagentSessionDir = path.join(os.homedir(), ".pi", "agent", "subagent-sessions");
+	const args: string[] = ["--mode", "json", "-p", "--session-dir", subagentSessionDir];
 	const effectiveModel = resolveModelAlias(modelOverride || agent.model);
 	if (effectiveModel) args.push("--model", effectiveModel);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
