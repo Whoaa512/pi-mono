@@ -284,11 +284,13 @@ describe("resolveModelScopeWithDiagnostics", () => {
 				{
 					type: "warning",
 					message: 'Invalid thinking level "invalid" in pattern "gpt-4o:invalid". Using default instead.',
+					code: "invalid-thinking-level",
 					pattern: "gpt-4o:invalid",
 				},
 				{
 					type: "warning",
 					message: 'No models match pattern "missing"',
+					code: "no-match",
 					pattern: "missing",
 				},
 			]);
@@ -470,6 +472,64 @@ describe("resolveCliModel", () => {
 
 		expect(result.model).toBeUndefined();
 		expect(result.error).toContain("No models available");
+	});
+
+	test("prefers the sole authenticated provider for an ambiguous bare exact model id", () => {
+		const azureModel: Model<"anthropic-messages"> = {
+			...mockModels[1],
+			id: "gpt-5.6-sol",
+			name: "GPT 5.6 Sol",
+			provider: "azure-openai-responses",
+		};
+		const codexModel: Model<"anthropic-messages"> = {
+			...mockModels[1],
+			id: "gpt-5.6-sol",
+			name: "GPT 5.6 Sol",
+			provider: "openai-codex",
+		};
+		const registry = {
+			getModels: () => [azureModel, codexModel],
+			hasConfiguredAuth: (provider: string) => provider === "openai-codex",
+		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRuntime"];
+
+		const result = resolveCliModel({
+			cliModel: "gpt-5.6-sol",
+			modelRuntime: registry,
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("openai-codex");
+		expect(result.model?.id).toBe("gpt-5.6-sol");
+	});
+
+	test("requires an explicit provider for an ambiguous bare exact model id without a unique authenticated provider", () => {
+		const azureModel: Model<"anthropic-messages"> = {
+			...mockModels[1],
+			id: "gpt-5.6-sol",
+			name: "GPT 5.6 Sol",
+			provider: "azure-openai-responses",
+		};
+		const codexModel: Model<"anthropic-messages"> = {
+			...mockModels[1],
+			id: "gpt-5.6-sol",
+			name: "GPT 5.6 Sol",
+			provider: "openai-codex",
+		};
+		const registry = {
+			getModels: () => [azureModel, codexModel],
+			hasConfiguredAuth: () => false,
+		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRuntime"];
+
+		const result = resolveCliModel({
+			cliModel: "gpt-5.6-sol",
+			modelRuntime: registry,
+		});
+
+		expect(result.model).toBeUndefined();
+		expect(result.error).toContain('Model "gpt-5.6-sol" is ambiguous across providers');
+		expect(result.error).toContain("azure-openai-responses/gpt-5.6-sol");
+		expect(result.error).toContain("openai-codex/gpt-5.6-sol");
+		expect(result.error).toContain("Use --provider or provider/model");
 	});
 
 	test("prefers provider/model split over gateway model with matching id", () => {
@@ -782,7 +842,7 @@ describe("default model selection", () => {
 		};
 
 		const registry = {
-			getAvailable: async () => [aiGatewayModel],
+			getAvailableSnapshot: () => [aiGatewayModel],
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
 
 		const result = await findInitialModel({
@@ -819,7 +879,7 @@ describe("default model selection", () => {
 					? savedDeepSeekModel
 					: undefined,
 			hasConfiguredAuth: (provider: string) => provider === "spark-two",
-			getAvailable: async () => [localDeepSeekModel],
+			getAvailableSnapshot: () => [localDeepSeekModel],
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
 
 		const result = await findInitialModel({
