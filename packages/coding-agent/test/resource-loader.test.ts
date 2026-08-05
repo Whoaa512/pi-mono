@@ -1068,6 +1068,10 @@ export default function(pi: ExtensionAPI) {
 	});
 
 	describe("loadProjectContextFiles - nested worktree dedup", () => {
+		// The fork also injects ~/.claude/CLAUDE.md; exclude it so exact-list assertions stay hermetic.
+		const loadProjectFiles = (options: Parameters<typeof loadProjectContextFiles>[0]) =>
+			loadProjectContextFiles(options).filter((f) => !f.path.startsWith(join(homedir(), ".claude")));
+
 		// Builds a linked-worktree skeleton (no git binary needed): the main repo's
 		// `.git/worktrees/<name>/` holds `HEAD` plus a `commondir` pointing back at the
 		// main `.git`, and the worktree's working tree carries a `.git` *file* whose
@@ -1100,7 +1104,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["worktree instructions"]);
 		});
@@ -1109,7 +1113,7 @@ export default function(pi: ExtensionAPI) {
 			const { main, worktreeSrc } = setupNestedWorktree();
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 
-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["main repo instructions"]);
 		});
@@ -1122,7 +1126,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "CLAUDE.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["main repo instructions", "worktree instructions"]);
 		});
@@ -1145,7 +1149,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(proj, "AGENTS.md"), "container instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectContextFiles({ cwd: worktree, agentDir });
+			const files = loadProjectFiles({ cwd: worktree, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["container instructions", "worktree instructions"]);
 		});
@@ -1156,7 +1160,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
 
 			// Only the main repo root's duplicate is dropped; the unrelated dir above it stays.
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "worktree instructions"]);
@@ -1175,7 +1179,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(sib, "AGENTS.md"), "sibling worktree instructions");
 			linkWorktree(main, sib, "sib");
 
-			const files = loadProjectContextFiles({ cwd: sibSrc, agentDir });
+			const files = loadProjectFiles({ cwd: sibSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "sibling worktree instructions"]);
 		});
@@ -1194,7 +1198,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(subGitDir, "HEAD"), "ref: refs/heads/main\n");
 			writeFileSync(join(sub, ".git"), `gitdir: ${subGitDir}\n`);
 
-			const files = loadProjectContextFiles({ cwd: subSrc, agentDir });
+			const files = loadProjectFiles({ cwd: subSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["superproject instructions", "submodule instructions"]);
 		});
@@ -1210,7 +1214,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(repo, "AGENTS.md"), "repo instructions");
 			writeFileSync(join(leaf, "AGENTS.md"), "leaf instructions");
 
-			const files = loadProjectContextFiles({ cwd: leaf, agentDir });
+			const files = loadProjectFiles({ cwd: leaf, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "repo instructions", "leaf instructions"]);
 		});
@@ -1223,7 +1227,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(repo, "AGENTS.md"), "repo instructions");
 			writeFileSync(join(src, "AGENTS.md"), "src instructions");
 
-			const files = loadProjectContextFiles({ cwd: src, agentDir });
+			const files = loadProjectFiles({ cwd: src, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["repo instructions", "src instructions"]);
 		});

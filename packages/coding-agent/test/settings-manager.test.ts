@@ -573,8 +573,8 @@ describe("SettingsManager", () => {
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// Project replaces the entire per-extension object (shallow merge at extension-settings level)
-			expect(manager.getExtensionSettings("subagent")).toEqual({ maxParallelTasks: 16 });
+			// Project keys override per-key; global keys not overridden survive (deep merge)
+			expect(manager.getExtensionSettings("subagent")).toEqual({ maxParallelTasks: 16, maxConcurrency: 4 });
 			// Extensions not overridden in project keep global values
 			expect(manager.getExtensionSettings("other")).toEqual({ foo: "bar" });
 		});
