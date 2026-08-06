@@ -2,10 +2,15 @@
  * Question Tool - Single question with options
  * Full custom UI: options list + inline editor for "Type something..."
  * Escape in editor returns to options, Escape in options cancels
+ *
+ * If a session is resumed while a question tool call is still pending
+ * (no tool result recorded), the question UI is shown again on resume
+ * and the answer is sent back to the agent as a user message.
  */
 
 import { connect } from "node:net";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ToolCall } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
 	Editor,
 	type EditorTheme,
@@ -42,6 +47,12 @@ interface OptionWithDesc {
 
 type DisplayOption = OptionWithDesc & { isOther?: boolean };
 
+interface QuestionAnswer {
+	answer: string;
+	wasCustom: boolean;
+	index?: number;
+}
+
 interface QuestionDetails {
 	question: string;
 	options: string[];
@@ -59,6 +70,182 @@ const QuestionParams = Type.Object({
 	question: Type.String({ description: "The question to ask the user" }),
 	options: Type.Array(OptionSchema, { description: "Options for the user to choose from" }),
 });
+
+/**
+ * Find a question tool call that never received a tool result because the
+ * session ended mid-call (e.g. terminal killed while the UI was open). Only the
+ * final message on the branch counts: anything after it means the agent moved on.
+ */
+function findPendingQuestion(ctx: ExtensionContext): { question: string; options: OptionWithDesc[] } | undefined {
+	const entries = ctx.sessionManager.getBranch();
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry.type !== "message") continue;
+		const message = entry.message;
+		if (message.role !== "assistant") return undefined;
+		const call = message.content.find((c): c is ToolCall => c.type === "toolCall" && c.name === "question");
+		if (!call) return undefined;
+		const args = call.arguments as { question?: string; options?: OptionWithDesc[] } | undefined;
+		if (typeof args?.question !== "string" || !Array.isArray(args.options) || args.options.length === 0) {
+			return undefined;
+		}
+		if (args.options.some((o) => !o || typeof o.label !== "string")) return undefined;
+		return { question: args.question, options: args.options };
+	}
+	return undefined;
+}
+
+async function runQuestionUI(
+	ui: ExtensionUIContext,
+	question: string,
+	options: OptionWithDesc[],
+): Promise<QuestionAnswer | null> {
+	const allOptions: DisplayOption[] = [...options, { label: "Type something.", isOther: true }];
+
+	sendSupacodeFlag("2");
+	try {
+		return await ui.custom<QuestionAnswer | null>((tui, theme, _kb, done) => {
+			let optionIndex = 0;
+			let editMode = false;
+			let cachedLines: string[] | undefined;
+			let cachedWidth: number | undefined;
+
+			const editorTheme: EditorTheme = {
+				borderColor: (s) => theme.fg("accent", s),
+				selectList: {
+					selectedPrefix: (t) => theme.fg("accent", t),
+					selectedText: (t) => theme.fg("accent", t),
+					description: (t) => theme.fg("muted", t),
+					scrollInfo: (t) => theme.fg("dim", t),
+					noMatch: (t) => theme.fg("warning", t),
+				},
+			};
+			const editor = new Editor(tui, editorTheme);
+
+			editor.onSubmit = (value) => {
+				const trimmed = value.trim();
+				if (trimmed) {
+					done({ answer: trimmed, wasCustom: true });
+				} else {
+					editMode = false;
+					editor.setText("");
+					refresh();
+				}
+			};
+
+			function refresh() {
+				cachedLines = undefined;
+				tui.requestRender();
+			}
+
+			function handleInput(data: string) {
+				if (editMode) {
+					if (matchesKey(data, Key.escape)) {
+						editMode = false;
+						editor.setText("");
+						refresh();
+						return;
+					}
+					editor.handleInput(data);
+					refresh();
+					return;
+				}
+
+				if (matchesKey(data, Key.up)) {
+					optionIndex = Math.max(0, optionIndex - 1);
+					refresh();
+					return;
+				}
+				if (matchesKey(data, Key.down)) {
+					optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
+					refresh();
+					return;
+				}
+
+				if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
+					const selected = allOptions[optionIndex];
+					if (selected.isOther) {
+						editMode = true;
+						refresh();
+					} else {
+						done({ answer: selected.label, wasCustom: false, index: optionIndex + 1 });
+					}
+					return;
+				}
+
+				if (matchesKey(data, Key.escape)) {
+					done(null);
+				}
+			}
+
+			function render(width: number): string[] {
+				if (cachedLines && cachedWidth === width) return cachedLines;
+
+				const lines: string[] = [];
+				const add = (s: string) => lines.push(truncateToWidth(s, width));
+				const wrap = (s: string, indent = "") => {
+					const wrapped = wrapTextWithAnsi(s, width - indent.length);
+					lines.push(wrapped[0]);
+					for (let j = 1; j < wrapped.length; j++) lines.push(indent + wrapped[j]);
+				};
+
+				add(theme.fg("accent", "─".repeat(width)));
+				wrap(theme.fg("text", ` ${question}`), " ");
+				lines.push("");
+
+				const indent = "     ";
+				for (let i = 0; i < allOptions.length; i++) {
+					const opt = allOptions[i];
+					const selected = i === optionIndex;
+					const isOther = opt.isOther === true;
+					const prefix = selected ? theme.fg("accent", "> ") : "  ";
+
+					if (isOther && editMode) {
+						wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`), indent);
+					} else if (selected) {
+						wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label}`), indent);
+					} else {
+						wrap(`  ${theme.fg("text", `${i + 1}. ${opt.label}`)}`, indent);
+					}
+
+					if (opt.description) {
+						wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
+					}
+				}
+
+				if (editMode) {
+					lines.push("");
+					add(theme.fg("muted", " Your answer:"));
+					for (const line of editor.render(width - 2)) {
+						add(` ${line}`);
+					}
+				}
+
+				lines.push("");
+				if (editMode) {
+					add(theme.fg("dim", " Enter to submit • Esc to go back"));
+				} else {
+					add(theme.fg("dim", " ↑↓ navigate • Space/Enter to select • Esc to cancel"));
+				}
+				add(theme.fg("accent", "─".repeat(width)));
+
+				cachedLines = lines;
+				cachedWidth = width;
+				return lines;
+			}
+
+			return {
+				render,
+				invalidate: () => {
+					cachedLines = undefined;
+				},
+				handleInput,
+			};
+		});
+	} finally {
+		sendSupacodeFlag("1");
+	}
+}
 
 export default function question(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -89,154 +276,7 @@ export default function question(pi: ExtensionAPI) {
 				};
 			}
 
-			const allOptions: DisplayOption[] = [...params.options, { label: "Type something.", isOther: true }];
-
-			sendSupacodeFlag("2");
-			let result: { answer: string; wasCustom: boolean; index?: number } | null;
-			try {
-				result = await ctx.ui.custom<{ answer: string; wasCustom: boolean; index?: number } | null>(
-					(tui, theme, _kb, done) => {
-						let optionIndex = 0;
-						let editMode = false;
-						let cachedLines: string[] | undefined;
-						let cachedWidth: number | undefined;
-
-						const editorTheme: EditorTheme = {
-							borderColor: (s) => theme.fg("accent", s),
-							selectList: {
-								selectedPrefix: (t) => theme.fg("accent", t),
-								selectedText: (t) => theme.fg("accent", t),
-								description: (t) => theme.fg("muted", t),
-								scrollInfo: (t) => theme.fg("dim", t),
-								noMatch: (t) => theme.fg("warning", t),
-							},
-						};
-						const editor = new Editor(tui, editorTheme);
-
-						editor.onSubmit = (value) => {
-							const trimmed = value.trim();
-							if (trimmed) {
-								done({ answer: trimmed, wasCustom: true });
-							} else {
-								editMode = false;
-								editor.setText("");
-								refresh();
-							}
-						};
-
-						function refresh() {
-							cachedLines = undefined;
-							tui.requestRender();
-						}
-
-						function handleInput(data: string) {
-							if (editMode) {
-								if (matchesKey(data, Key.escape)) {
-									editMode = false;
-									editor.setText("");
-									refresh();
-									return;
-								}
-								editor.handleInput(data);
-								refresh();
-								return;
-							}
-
-							if (matchesKey(data, Key.up)) {
-								optionIndex = Math.max(0, optionIndex - 1);
-								refresh();
-								return;
-							}
-							if (matchesKey(data, Key.down)) {
-								optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
-								refresh();
-								return;
-							}
-
-							if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
-								const selected = allOptions[optionIndex];
-								if (selected.isOther) {
-									editMode = true;
-									refresh();
-								} else {
-									done({ answer: selected.label, wasCustom: false, index: optionIndex + 1 });
-								}
-								return;
-							}
-
-							if (matchesKey(data, Key.escape)) {
-								done(null);
-							}
-						}
-
-						function render(width: number): string[] {
-							if (cachedLines && cachedWidth === width) return cachedLines;
-
-							const lines: string[] = [];
-							const add = (s: string) => lines.push(truncateToWidth(s, width));
-							const wrap = (s: string, indent = "") => {
-								const wrapped = wrapTextWithAnsi(s, width - indent.length);
-								lines.push(wrapped[0]);
-								for (let j = 1; j < wrapped.length; j++) lines.push(indent + wrapped[j]);
-							};
-
-							add(theme.fg("accent", "─".repeat(width)));
-							wrap(theme.fg("text", ` ${params.question}`), " ");
-							lines.push("");
-
-							const indent = "     ";
-							for (let i = 0; i < allOptions.length; i++) {
-								const opt = allOptions[i];
-								const selected = i === optionIndex;
-								const isOther = opt.isOther === true;
-								const prefix = selected ? theme.fg("accent", "> ") : "  ";
-
-								if (isOther && editMode) {
-									wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`), indent);
-								} else if (selected) {
-									wrap(prefix + theme.fg("accent", `${i + 1}. ${opt.label}`), indent);
-								} else {
-									wrap(`  ${theme.fg("text", `${i + 1}. ${opt.label}`)}`, indent);
-								}
-
-								if (opt.description) {
-									wrap(`${indent}${theme.fg("muted", opt.description)}`, indent);
-								}
-							}
-
-							if (editMode) {
-								lines.push("");
-								add(theme.fg("muted", " Your answer:"));
-								for (const line of editor.render(width - 2)) {
-									add(` ${line}`);
-								}
-							}
-
-							lines.push("");
-							if (editMode) {
-								add(theme.fg("dim", " Enter to submit • Esc to go back"));
-							} else {
-								add(theme.fg("dim", " ↑↓ navigate • Space/Enter to select • Esc to cancel"));
-							}
-							add(theme.fg("accent", "─".repeat(width)));
-
-							cachedLines = lines;
-							cachedWidth = width;
-							return lines;
-						}
-
-						return {
-							render,
-							invalidate: () => {
-								cachedLines = undefined;
-							},
-							handleInput,
-						};
-					},
-				);
-			} finally {
-				sendSupacodeFlag("1");
-			}
+			const result = await runQuestionUI(ctx.ui, params.question, params.options);
 
 			// Build simple options list for details
 			const simpleOptions = params.options.map((o) => o.label);
@@ -303,5 +343,21 @@ export default function question(pi: ExtensionAPI) {
 			const display = idx > 0 ? `${idx}. ${details.answer}` : details.answer;
 			return new Text(theme.fg("success", "✓ ") + theme.fg("accent", display), 0, 0);
 		},
+	});
+
+	// Re-trigger the question UI when a session is resumed while a question
+	// tool call was still pending (session ended mid-question).
+	pi.on("session_start", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		const pending = findPendingQuestion(ctx);
+		if (!pending) return;
+
+		const result = await runQuestionUI(ctx.ui, pending.question, pending.options);
+		if (!result) return;
+
+		const answerText = result.wasCustom
+			? `The user wrote: ${result.answer}`
+			: `The user selected: ${result.index}. ${result.answer}`;
+		pi.sendUserMessage(`The session was resumed with an unanswered question ("${pending.question}"). ${answerText}`);
 	});
 }
