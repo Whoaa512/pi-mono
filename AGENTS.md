@@ -162,6 +162,15 @@ Attribution:
 
 5. **If CI publish fails**: inspect the failed `publish-npm` job. The publish helper is idempotent and skips package versions already present on npm, so rerun the tag workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Local install: ~/bin/pi is a wrapper, not a symlink
+
+`~/bin/pi` is a shell wrapper that execs mise's `node/lts` against
+`packages/coding-agent/dist/cli.js`. It is NOT a symlink — do not replace it
+with one. Reason: `#!/usr/bin/env node` inherits repo-local mise Node pins
+(e.g. a repo pinning Node 22.11, which lacks `zlib.createZstdDecompress` and
+crashes undici's fetch inside pi). Rebuilding `dist/` is fine and requires no
+change to the wrapper.
+
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
