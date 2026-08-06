@@ -347,17 +347,26 @@ export default function question(pi: ExtensionAPI) {
 
 	// Re-trigger the question UI when a session is resumed while a question
 	// tool call was still pending (session ended mid-question).
-	pi.on("session_start", async (_event, ctx) => {
+	// Uses resources_discover instead of session_start: it fires after ALL
+	// session_start handlers, so extensions that swap the editor component on
+	// session_start (which clears the editor container) cannot clobber this UI.
+	// The UI task is not awaited: blocking here would keep the conversation
+	// history hidden until the question is answered.
+	pi.on("resources_discover", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		const pending = findPendingQuestion(ctx);
 		if (!pending) return;
 
-		const result = await runQuestionUI(ctx.ui, pending.question, pending.options);
-		if (!result) return;
+		void (async () => {
+			const result = await runQuestionUI(ctx.ui, pending.question, pending.options);
+			if (!result) return;
 
-		const answerText = result.wasCustom
-			? `The user wrote: ${result.answer}`
-			: `The user selected: ${result.index}. ${result.answer}`;
-		pi.sendUserMessage(`The session was resumed with an unanswered question ("${pending.question}"). ${answerText}`);
+			const answerText = result.wasCustom
+				? `The user wrote: ${result.answer}`
+				: `The user selected: ${result.index}. ${result.answer}`;
+			pi.sendUserMessage(
+				`The session was resumed with an unanswered question ("${pending.question}"). ${answerText}`,
+			);
+		})().catch(() => {});
 	});
 }

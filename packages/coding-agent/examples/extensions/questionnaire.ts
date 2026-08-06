@@ -628,18 +628,25 @@ export default function questionnaire(pi: ExtensionAPI) {
 
 	// Re-trigger the questionnaire UI when a session is resumed while a
 	// questionnaire tool call was still pending (session ended mid-question).
-	pi.on("session_start", async (_event, ctx) => {
+	// Uses resources_discover instead of session_start: it fires after ALL
+	// session_start handlers, so extensions that swap the editor component on
+	// session_start (which clears the editor container) cannot clobber this UI.
+	// The UI task is not awaited: blocking here would keep the conversation
+	// history hidden until the questionnaire is answered.
+	pi.on("resources_discover", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		const pending = findPendingQuestionnaire(ctx);
 		if (!pending) return;
 
-		const questions = normalizeQuestions(pending);
-		const result = await runQuestionnaireUI(ctx.ui, questions);
-		if (result.cancelled) return;
+		void (async () => {
+			const questions = normalizeQuestions(pending);
+			const result = await runQuestionnaireUI(ctx.ui, questions);
+			if (result.cancelled) return;
 
-		const answerLines = formatAnswerLines(questions, result.answers);
-		pi.sendUserMessage(
-			`The session was resumed with an unanswered questionnaire. The user has now answered:\n${answerLines.join("\n")}`,
-		);
+			const answerLines = formatAnswerLines(questions, result.answers);
+			pi.sendUserMessage(
+				`The session was resumed with an unanswered questionnaire. The user has now answered:\n${answerLines.join("\n")}`,
+			);
+		})().catch(() => {});
 	});
 }
