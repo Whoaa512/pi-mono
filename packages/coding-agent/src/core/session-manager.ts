@@ -185,6 +185,13 @@ export interface SessionInfo {
 	messageCount: number;
 	firstMessage: string;
 	allMessagesText: string;
+	/** Per-message previews (user/assistant text, capped) for role-scoped search and relevant-message display. */
+	messages: SessionMessagePreview[];
+}
+
+export interface SessionMessagePreview {
+	role: "user" | "assistant";
+	text: string;
 }
 
 export type ReadonlySessionManager = Pick<
@@ -684,6 +691,8 @@ function getMessageActivityTime(entry: SessionMessageEntry): number | undefined 
 	return Number.isNaN(t) ? undefined : t;
 }
 
+const MESSAGE_PREVIEW_MAX_CHARS = 2000;
+
 async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 	try {
 		const stats = await stat(filePath);
@@ -691,6 +700,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 		let messageCount = 0;
 		let firstMessage = "";
 		const allMessages: string[] = [];
+		const messagePreviews: SessionMessagePreview[] = [];
 		let name: string | undefined;
 		let lastActivityTime: number | undefined;
 
@@ -730,6 +740,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			if (!textContent) continue;
 
 			allMessages.push(textContent);
+			messagePreviews.push({ role: message.role, text: textContent.slice(0, MESSAGE_PREVIEW_MAX_CHARS) });
 			if (!firstMessage && message.role === "user") {
 				firstMessage = textContent;
 			}
@@ -758,6 +769,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			messageCount,
 			firstMessage: firstMessage || "(no messages)",
 			allMessagesText: allMessages.join(" "),
+			messages: messagePreviews,
 		};
 	} catch {
 		return null;

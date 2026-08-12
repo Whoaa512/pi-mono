@@ -22,6 +22,7 @@ export interface AppKeybindings {
 	"app.tools.expand": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
+	"app.session.toggleRoleFilter": true;
 	"app.editor.external": true;
 	"app.message.copy": true;
 	"app.message.followUp": true;
@@ -91,6 +92,10 @@ export const KEYBINDINGS = {
 	"app.session.toggleNamedFilter": {
 		defaultKeys: "ctrl+n",
 		description: "Toggle named session filter",
+	},
+	"app.session.toggleRoleFilter": {
+		defaultKeys: "ctrl+o",
+		description: "Cycle session search role filter (both/user/agent)",
 	},
 	"app.editor.external": {
 		defaultKeys: "ctrl+g",
@@ -249,6 +254,7 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	expandTools: "app.tools.expand",
 	toggleThinking: "app.thinking.toggle",
 	toggleSessionNamedFilter: "app.session.toggleNamedFilter",
+	toggleSessionRoleFilter: "app.session.toggleRoleFilter",
 	externalEditor: "app.editor.external",
 	followUp: "app.message.followUp",
 	dequeue: "app.message.dequeue",

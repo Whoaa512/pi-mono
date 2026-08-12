@@ -15,7 +15,12 @@ function makeSession(
 		messageCount: overrides.messageCount ?? 1,
 		firstMessage: overrides.firstMessage ?? "(no messages)",
 		allMessagesText: overrides.allMessagesText,
+		messages: overrides.messages ?? [{ role: "user", text: overrides.allMessagesText }],
 	};
+}
+
+function ids(result: { session: SessionInfo }[]): string[] {
+	return result.map((r) => r.session.id);
 }
 
 describe("session selector search", () => {
@@ -34,7 +39,7 @@ describe("session selector search", () => {
 		];
 
 		const result = filterAndSortSessions(sessions, '"node cve"', "recent");
-		expect(result.map((s) => s.id)).toEqual(["a"]);
+		expect(ids(result)).toEqual(["a"]);
 	});
 
 	it("filters by regex (re:) and is case-insensitive", () => {
@@ -52,7 +57,7 @@ describe("session selector search", () => {
 		];
 
 		const result = filterAndSortSessions(sessions, "re:\\bbrave\\b", "recent");
-		expect(result.map((s) => s.id)).toEqual(["a"]);
+		expect(ids(result)).toEqual(["a"]);
 	});
 
 	it("recent sort preserves input order", () => {
@@ -75,7 +80,7 @@ describe("session selector search", () => {
 		];
 
 		const result = filterAndSortSessions(sessions, '"brave"', "recent");
-		expect(result.map((s) => s.id)).toEqual(["newer", "older"]);
+		expect(ids(result)).toEqual(["newer", "older"]);
 	});
 
 	it("relevance sort orders by score and tie-breaks by modified desc", () => {
@@ -93,7 +98,7 @@ describe("session selector search", () => {
 		];
 
 		const result1 = filterAndSortSessions(sessions, '"brave"', "relevance");
-		expect(result1.map((s) => s.id)).toEqual(["early", "late"]);
+		expect(ids(result1)).toEqual(["early", "late"]);
 
 		const tieSessions: SessionInfo[] = [
 			makeSession({
@@ -109,7 +114,7 @@ describe("session selector search", () => {
 		];
 
 		const result2 = filterAndSortSessions(tieSessions, '"brave"', "relevance");
-		expect(result2.map((s) => s.id)).toEqual(["newer", "older"]);
+		expect(ids(result2)).toEqual(["newer", "older"]);
 	});
 
 	it("returns empty list for invalid regex", () => {
@@ -153,17 +158,17 @@ describe("session selector search", () => {
 
 		it("returns all sessions when nameFilter is 'all'", () => {
 			const result = filterAndSortSessions(sessions, "", "recent", "all");
-			expect(result.map((session) => session.id)).toEqual(["named1", "named2", "other1", "other2"]);
+			expect(ids(result)).toEqual(["named1", "named2", "other1", "other2"]);
 		});
 
 		it("returns only named sessions when nameFilter is 'named'", () => {
 			const result = filterAndSortSessions(sessions, "", "recent", "named");
-			expect(result.map((session) => session.id)).toEqual(["named1", "named2"]);
+			expect(ids(result)).toEqual(["named1", "named2"]);
 		});
 
 		it("applies name filter before search query", () => {
 			const result = filterAndSortSessions(sessions, "blueberry", "recent", "named");
-			expect(result.map((session) => session.id)).toEqual(["named1", "named2"]);
+			expect(ids(result)).toEqual(["named1", "named2"]);
 		});
 
 		it("excludes whitespace-only names from named filter", () => {
@@ -189,7 +194,115 @@ describe("session selector search", () => {
 			];
 
 			const result = filterAndSortSessions(sessionsWithWhitespace, "", "recent", "named");
-			expect(result.map((session) => session.id)).toEqual(["named"]);
+			expect(ids(result)).toEqual(["named"]);
+		});
+	});
+
+	describe("per-message matching", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({
+				id: "same-message",
+				modified: new Date("2026-01-02T00:00:00.000Z"),
+				allMessagesText: "deploy the tugowar shadow service",
+				messages: [
+					{ role: "user", text: "deploy the tugowar shadow service" },
+					{ role: "assistant", text: "done, rolled out" },
+				],
+			}),
+			makeSession({
+				id: "split-across-messages",
+				modified: new Date("2026-01-03T00:00:00.000Z"),
+				allMessagesText: "look at tugowar metrics the shadow of a doubt",
+				messages: [
+					{ role: "user", text: "look at tugowar metrics" },
+					{ role: "assistant", text: "the shadow of a doubt" },
+				],
+			}),
+		];
+
+		it("requires all tokens to match within a single message", () => {
+			const result = filterAndSortSessions(sessions, "tugowar shadow", "recent");
+			expect(ids(result)).toEqual(["same-message"]);
+		});
+
+		it("reports the best-matching message", () => {
+			const result = filterAndSortSessions(sessions, "tugowar shadow", "recent");
+			expect(result[0]?.bestMessage?.text).toBe("deploy the tugowar shadow service");
+			expect(result[0]?.bestMessage?.role).toBe("user");
+		});
+
+		it("matches session metadata (name) without a bestMessage", () => {
+			const named = makeSession({
+				id: "meta",
+				name: "Zanzibar Refactor",
+				modified: new Date("2026-01-01T00:00:00.000Z"),
+				allMessagesText: "unrelated text",
+				messages: [{ role: "user", text: "unrelated text" }],
+			});
+			const result = filterAndSortSessions([named], "zanzibar", "recent");
+			expect(ids(result)).toEqual(["meta"]);
+			expect(result[0]?.bestMessage).toBeUndefined();
+		});
+
+		it("falls back to flattened text when previews are missing", () => {
+			const legacy = makeSession({
+				id: "legacy",
+				modified: new Date("2026-01-01T00:00:00.000Z"),
+				allMessagesText: "alpha beta gamma",
+				messages: [],
+			});
+			const result = filterAndSortSessions([legacy], "alpha gamma", "recent");
+			expect(ids(result)).toEqual(["legacy"]);
+		});
+	});
+
+	describe("role filter", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({
+				id: "user-hit",
+				modified: new Date("2026-01-02T00:00:00.000Z"),
+				allMessagesText: "fix the login bug ok done",
+				messages: [
+					{ role: "user", text: "fix the login bug" },
+					{ role: "assistant", text: "ok done" },
+				],
+			}),
+			makeSession({
+				id: "agent-hit",
+				modified: new Date("2026-01-01T00:00:00.000Z"),
+				allMessagesText: "help me here found the login bug in auth.ts",
+				messages: [
+					{ role: "user", text: "help me here" },
+					{ role: "assistant", text: "found the login bug in auth.ts" },
+				],
+			}),
+		];
+
+		it("matches both roles by default", () => {
+			const result = filterAndSortSessions(sessions, '"login bug"', "recent");
+			expect(ids(result)).toEqual(["user-hit", "agent-hit"]);
+		});
+
+		it("restricts matches to user messages", () => {
+			const result = filterAndSortSessions(sessions, '"login bug"', "recent", "all", "user");
+			expect(ids(result)).toEqual(["user-hit"]);
+		});
+
+		it("restricts matches to agent messages", () => {
+			const result = filterAndSortSessions(sessions, '"login bug"', "recent", "all", "agent");
+			expect(ids(result)).toEqual(["agent-hit"]);
+		});
+
+		it("still matches metadata when role filter excludes all messages", () => {
+			const named = makeSession({
+				id: "meta-role",
+				name: "login bug hunt",
+				modified: new Date("2026-01-01T00:00:00.000Z"),
+				allMessagesText: "nothing relevant",
+				messages: [{ role: "assistant", text: "nothing relevant" }],
+			});
+			const result = filterAndSortSessions([named], '"login bug"', "recent", "all", "user");
+			expect(ids(result)).toEqual(["meta-role"]);
 		});
 	});
 });
