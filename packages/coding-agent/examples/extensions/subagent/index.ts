@@ -29,7 +29,10 @@ const DEFAULT_MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
 const PROCESS_EXIT_GRACE_MS = 30_000;
-const MAX_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_AGENT_TIMEOUT_MS = 69 * 60 * 1000;
+const envTimeoutMs = Number(process.env.PI_SUBAGENT_TIMEOUT_MS);
+const MAX_AGENT_TIMEOUT_MS =
+	Number.isFinite(envTimeoutMs) && envTimeoutMs > 0 ? envTimeoutMs : DEFAULT_MAX_AGENT_TIMEOUT_MS;
 
 const MODEL_ALIASES: Record<string, string> = {
 	opus: "anthropic/claude-opus-4-6",

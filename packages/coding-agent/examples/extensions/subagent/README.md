@@ -74,6 +74,12 @@ Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-se
 | `maxConcurrency` | 4 | Maximum agents running simultaneously |
 | `defaultAgentScope` | `"user"` | Default agent scope when `agentScope` is omitted. Use `"both"` to include project-local agents by default. |
 
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_SUBAGENT_TIMEOUT_MS` | `4140000` (69 min) | Hard cap per subagent run. On expiry the child process is killed and the partial transcript is returned with the error `Subagent exceeded maximum timeout`. |
+
 ## Security Model
 
 This tool executes a separate `pi` subprocess with a delegated system prompt and tool/model configuration.
