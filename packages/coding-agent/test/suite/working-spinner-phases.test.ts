@@ -80,6 +80,7 @@ function createSpinnerStub(): SpinnerStub {
 		checkShutdownRequested: async () => {},
 		maybeShowCacheMissNotice: () => {},
 		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
+		getMarkdownTransformers: () => [],
 		getRegisteredToolDefinition: () => undefined,
 		setWorkingPhaseMessage: (message: string | undefined) => prototype.setWorkingPhaseMessage.call(fakeThis, message),
 		clearRetryPhaseCountdown: () => prototype.clearRetryPhaseCountdown.call(fakeThis),

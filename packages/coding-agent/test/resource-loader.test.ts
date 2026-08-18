@@ -367,7 +367,11 @@ Content`,
 			const loader = new DefaultResourceLoader({ cwd: nestedCwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAgentsFiles().agentsFiles).toEqual([
+			// Fork injects the real ~/.claude/CLAUDE.md; drop it so the exact-list assertion holds.
+			const agentsFiles = loader
+				.getAgentsFiles()
+				.agentsFiles.filter((f) => !f.path.startsWith(join(homedir(), ".claude")));
+			expect(agentsFiles).toEqual([
 				{ path: join(agentDir, "AGENTS.override.md"), content: "global override" },
 				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
 				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },

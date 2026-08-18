@@ -953,9 +953,7 @@ function applyAnthropicCacheControl(
 ): void {
 	addCacheControlToSystemPrompt(messages, cacheControl);
 	addCacheControlToLastTool(tools, cacheControl);
-	// Cap conversation breakpoints to 2: matches Claude Code's strategy and keeps
-	// total breakpoints (system + tool + 2 conv) at Anthropic's hard limit of 4.
-	addCacheControlToLastNConversationMessages(messages, cacheControl, 2);
+	addCacheControlToLastConversationMessage(messages, cacheControl);
 }
 
 function addCacheControlToSystemPrompt(
@@ -970,17 +968,15 @@ function addCacheControlToSystemPrompt(
 	}
 }
 
-function addCacheControlToLastNConversationMessages(
+function addCacheControlToLastConversationMessage(
 	messages: ChatCompletionMessageParam[],
 	cacheControl: OpenAICompatCacheControl,
-	count: number,
 ): void {
-	let marked = 0;
-	for (let i = messages.length - 1; i >= 0 && marked < count; i--) {
+	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message.role === "user" || message.role === "assistant" || message.role === "tool") {
 			if (addCacheControlToMessage(message, cacheControl)) {
-				marked++;
+				return;
 			}
 		}
 	}
