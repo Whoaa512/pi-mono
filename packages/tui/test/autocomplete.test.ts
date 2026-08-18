@@ -172,6 +172,36 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.ok(!values?.includes("@alpine.txt"), "new file should be served from cache, not a fresh fd walk");
 		});
 
+		test("incremental query narrowing returns same results as a direct query", async () => {
+			setupFolder(baseDir, {
+				files: {
+					"src/handlers/main.go": "package handlers",
+					"src/handshake.go": "package src",
+					"docs/handbook.md": "handbook",
+				},
+			});
+
+			const narrowingProvider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			let narrowed: Awaited<ReturnType<typeof getSuggestions>> = null;
+			for (const query of ["@h", "@ha", "@han", "@hand", "@handl"]) {
+				narrowed = await getSuggestions(narrowingProvider, [query], 0, query.length);
+			}
+
+			const directProvider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const direct = await getSuggestions(directProvider, ["@handl"], 0, 6);
+
+			assert.deepStrictEqual(
+				narrowed?.items.map((item) => item.value),
+				direct?.items.map((item) => item.value),
+			);
+
+			// Backspacing (query shrinks) must fall back to the full listing.
+			const widened = await getSuggestions(narrowingProvider, ["@han"], 0, 4);
+			const widenedValues = widened?.items.map((item) => item.value);
+			assert.ok(widenedValues?.includes("@src/handshake.go"));
+			assert.ok(widenedValues?.includes("@docs/handbook.md"));
+		});
+
 		test("matches file with extension in query", async () => {
 			setupFolder(baseDir, {
 				files: {

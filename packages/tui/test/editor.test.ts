@@ -2279,7 +2279,7 @@ describe("Editor component", () => {
 			assert.strictEqual(suggestionCalls, 0);
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2371,7 +2371,7 @@ describe("Editor component", () => {
 			assert.strictEqual(suggestionCalls, 0);
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2397,7 +2397,7 @@ describe("Editor component", () => {
 			editor.handleInput("k");
 
 			assert.strictEqual(suggestionCalls, 0);
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2423,7 +2423,7 @@ describe("Editor component", () => {
 
 			editor.handleInput("$");
 			editor.handleInput("s");
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 0);
@@ -2462,7 +2462,7 @@ describe("Editor component", () => {
 			editor.handleInput("i");
 			await new Promise((resolve) => setTimeout(resolve, 250));
 			editor.handleInput("n");
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 200));
 
 			assert.strictEqual(aborts, 1);
 		});

@@ -216,12 +216,18 @@ async function walkDirectoryWithFd(
 	});
 }
 
-const FUZZY_LISTING_TTL_MS = 10_000;
-const FUZZY_LISTING_MAX_RESULTS = 50_000;
+const FUZZY_LISTING_TTL_MS = 15_000;
+const FUZZY_LISTING_MAX_RESULTS = 250_000;
 
 interface FuzzyListingCacheEntry {
 	entries: Array<{ path: string; isDirectory: boolean }>;
 	fetchedAt: number;
+}
+
+interface FuzzyFilterCacheEntry {
+	entries: Array<{ path: string; isDirectory: boolean }>;
+	query: string;
+	matched: Array<{ path: string; isDirectory: boolean }>;
 }
 
 export interface AutocompleteItem {
@@ -275,6 +281,11 @@ export interface AutocompleteProvider {
 
 	// Check if file completion should trigger for explicit Tab completion
 	shouldTriggerFileCompletion?(lines: string[], cursorLine: number, cursorCol: number): boolean;
+
+	// Optionally warm any expensive suggestion sources (e.g. a directory
+	// listing) as soon as a trigger character is typed, ahead of the
+	// debounced suggestion request. Must be cheap and idempotent.
+	prewarmSuggestions?(): void;
 }
 
 // Combined provider that handles both slash commands and file paths
@@ -283,6 +294,8 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	private basePath: string;
 	private fdPath: string | null;
 	private fuzzyListingCache = new Map<string, FuzzyListingCacheEntry>();
+	private fuzzyListingWalks = new Map<string, Promise<Array<{ path: string; isDirectory: boolean }>>>();
+	private fuzzyFilterCache: FuzzyFilterCacheEntry | null = null;
 
 	constructor(commands: (SlashCommand | AutocompleteItem)[] = [], basePath: string, fdPath: string | null = null) {
 		this.commands = commands;
@@ -721,8 +734,20 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 			let topEntries: Array<{ path: string; isDirectory: boolean }>;
 			if (fdQuery) {
-				topEntries = fuzzyFilter(entries, fdQuery, (entry) => entry.path).slice(0, 20);
+				// Extending a query can only shrink the match set (every token of the
+				// shorter query is a prefix of a token of the longer one, and
+				// subsequence matching is monotonic), so narrow the previous matches
+				// instead of re-scoring the full listing.
+				const previous = this.fuzzyFilterCache;
+				const candidates =
+					previous && previous.entries === entries && previous.query && fdQuery.startsWith(previous.query)
+						? previous.matched
+						: entries;
+				const matched = fuzzyFilter(candidates, fdQuery, (entry) => entry.path);
+				this.fuzzyFilterCache = { entries, query: fdQuery, matched };
+				topEntries = matched.slice(0, 20);
 			} else {
+				this.fuzzyFilterCache = null;
 				topEntries = entries.slice(0, 20);
 			}
 
@@ -765,17 +790,69 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		}
 
 		const cached = this.fuzzyListingCache.get(baseDir);
-		if (cached && Date.now() - cached.fetchedAt < FUZZY_LISTING_TTL_MS) {
+		if (cached) {
+			// Serve the cached listing immediately, even when stale. A stale
+			// listing refreshes in the background (deduped by the in-flight walk
+			// map) so keystrokes never block on a directory walk once a listing
+			// exists.
+			if (Date.now() - cached.fetchedAt >= FUZZY_LISTING_TTL_MS) {
+				void this.walkAndCacheListing(baseDir);
+			}
 			return cached.entries;
 		}
 
-		const entries = await walkDirectoryWithFd(baseDir, this.fdPath, "", FUZZY_LISTING_MAX_RESULTS, signal);
+		// The walk is intentionally detached from the request signal: aborting a
+		// keystroke's request must not kill the fd process, otherwise fast typing
+		// respawns and kills fd on every keystroke and the cache never fills.
+		// Concurrent requests share the same in-flight walk.
+		const entries = await this.walkAndCacheListing(baseDir);
 		if (signal.aborted) {
 			return [];
 		}
-
-		this.fuzzyListingCache.set(baseDir, { entries, fetchedAt: Date.now() });
 		return entries;
+	}
+
+	private walkAndCacheListing(baseDir: string): Promise<Array<{ path: string; isDirectory: boolean }>> {
+		const inFlight = this.fuzzyListingWalks.get(baseDir);
+		if (inFlight) {
+			return inFlight;
+		}
+
+		if (!this.fdPath) {
+			return Promise.resolve([]);
+		}
+
+		const walk = walkDirectoryWithFd(
+			baseDir,
+			this.fdPath,
+			"",
+			FUZZY_LISTING_MAX_RESULTS,
+			new AbortController().signal,
+		)
+			.then((entries) => {
+				this.fuzzyListingCache.set(baseDir, { entries, fetchedAt: Date.now() });
+				return entries;
+			})
+			.finally(() => {
+				this.fuzzyListingWalks.delete(baseDir);
+			});
+		this.fuzzyListingWalks.set(baseDir, walk);
+		return walk;
+	}
+
+	// Kick off the fd walk for the working directory the moment a trigger
+	// character is typed, so the listing is warm by the time the debounced
+	// suggestion request runs. No-op when a fresh listing or in-flight walk
+	// already exists.
+	prewarmSuggestions(): void {
+		if (!this.fdPath) {
+			return;
+		}
+		const cached = this.fuzzyListingCache.get(this.basePath);
+		if (cached && Date.now() - cached.fetchedAt < FUZZY_LISTING_TTL_MS) {
+			return;
+		}
+		void this.walkAndCacheListing(this.basePath);
 	}
 
 	// Check if we should trigger file completion (called on Tab key)

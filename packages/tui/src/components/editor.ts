@@ -240,7 +240,7 @@ const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	maxPrimaryColumnWidth: 32,
 };
 
-const ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS = 20;
+const ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS = 150;
 const DEFAULT_AUTOCOMPLETE_TRIGGER_CHARACTERS = ["@", "#"];
 
 function escapeCharacterClass(value: string): string {
@@ -2183,6 +2183,9 @@ export class Editor implements Component, Focusable {
 
 		const debounceMs = this.getAutocompleteDebounceMs(options);
 		if (debounceMs > 0) {
+			// Warm expensive suggestion sources immediately; only the suggestion
+			// request itself is debounced.
+			this.autocompleteProvider.prewarmSuggestions?.();
 			this.autocompleteDebounceTimer = setTimeout(() => {
 				this.autocompleteDebounceTimer = undefined;
 				void this.startAutocompleteRequest(startToken, options);
