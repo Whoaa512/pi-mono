@@ -216,6 +216,14 @@ async function walkDirectoryWithFd(
 	});
 }
 
+const FUZZY_LISTING_TTL_MS = 10_000;
+const FUZZY_LISTING_MAX_RESULTS = 50_000;
+
+interface FuzzyListingCacheEntry {
+	entries: Array<{ path: string; isDirectory: boolean }>;
+	fetchedAt: number;
+}
+
 export interface AutocompleteItem {
 	value: string;
 	label: string;
@@ -274,6 +282,7 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	private commands: (SlashCommand | AutocompleteItem)[];
 	private basePath: string;
 	private fdPath: string | null;
+	private fuzzyListingCache = new Map<string, FuzzyListingCacheEntry>();
 
 	constructor(commands: (SlashCommand | AutocompleteItem)[] = [], basePath: string, fdPath: string | null = null) {
 		this.commands = commands;
@@ -705,7 +714,7 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			const scopedQuery = this.resolveScopedFuzzyQuery(query);
 			const fdBaseDir = scopedQuery?.baseDir ?? this.basePath;
 			const fdQuery = scopedQuery?.query ?? query;
-			const entries = await walkDirectoryWithFd(fdBaseDir, this.fdPath, "", 5000, options.signal);
+			const entries = await this.getFuzzyListing(fdBaseDir, options.signal);
 			if (options.signal.aborted) {
 				return [];
 			}
@@ -742,6 +751,31 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		} catch {
 			return [];
 		}
+	}
+
+	// Cached fd listing per base directory. The fd walk is query-independent
+	// (fuzzy matching happens in JS), so repeat keystrokes reuse the same
+	// listing instead of respawning fd and re-walking the repo.
+	private async getFuzzyListing(
+		baseDir: string,
+		signal: AbortSignal,
+	): Promise<Array<{ path: string; isDirectory: boolean }>> {
+		if (!this.fdPath) {
+			return [];
+		}
+
+		const cached = this.fuzzyListingCache.get(baseDir);
+		if (cached && Date.now() - cached.fetchedAt < FUZZY_LISTING_TTL_MS) {
+			return cached.entries;
+		}
+
+		const entries = await walkDirectoryWithFd(baseDir, this.fdPath, "", FUZZY_LISTING_MAX_RESULTS, signal);
+		if (signal.aborted) {
+			return [];
+		}
+
+		this.fuzzyListingCache.set(baseDir, { entries, fetchedAt: Date.now() });
+		return entries;
 	}
 
 	// Check if we should trigger file completion (called on Tab key)

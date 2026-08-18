@@ -147,6 +147,31 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.deepStrictEqual(values, ["@README.md", "@src/"].sort());
 		});
 
+		test("reuses cached fd listing across keystrokes within TTL", async () => {
+			setupFolder(baseDir, {
+				files: {
+					"alpha.txt": "a",
+				},
+			});
+
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+			const first = await getSuggestions(provider, ["@al"], 0, 3);
+			assert.ok(first?.items.some((item) => item.value === "@alpha.txt"));
+
+			// A file created after the first query is not visible while the
+			// cached listing is fresh — proving fd is not respawned per keystroke.
+			setupFolder(baseDir, {
+				files: {
+					"alpine.txt": "b",
+				},
+			});
+
+			const second = await getSuggestions(provider, ["@al"], 0, 3);
+			const values = second?.items.map((item) => item.value);
+			assert.ok(values?.includes("@alpha.txt"));
+			assert.ok(!values?.includes("@alpine.txt"), "new file should be served from cache, not a fresh fd walk");
+		});
+
 		test("matches file with extension in query", async () => {
 			setupFolder(baseDir, {
 				files: {

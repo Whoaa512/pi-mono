@@ -12,6 +12,7 @@
 - Fixed alternate-screen Kitty images crossing vertical layout clip boundaries and overlapping sticky regions while scrolling.
 - Fixed alternate-screen redraws retransmitting Kitty image data when placements move or recently offscreen images return, dropping adjacent row content when reusing placements, rendering fixed-basis scroll content twice per frame, and scanning clipped transcript rows while painting.
 - Fixed fullscreen transcript navigation leaving no editor-accessible `Home`, `End`, `PageUp`, or `PageDown` variants by adding Ctrl-modified editor bindings ([#7574](https://github.com/earendil-works/pi/issues/7574)).
+- Fixed choppy and inconsistent `@` fuzzy file autocomplete in large repositories by caching the `fd` directory listing per base directory (10s TTL) instead of respawning `fd` on every keystroke, and by raising the listing cap from 5,000 to 50,000 entries so results are complete and deterministic.
 
 ### Added
 
