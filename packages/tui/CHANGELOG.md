@@ -2,10 +2,28 @@
 
 ## [Unreleased]
 
+## [0.84.4] - 2026-08-28
+
+### Added
+
+- Added environment and programmatic overrides for OSC 8 hyperlinks, inline image protocols, and truecolor terminal capabilities ([#8665](https://github.com/earendil-works/pi/issues/8665)).
+- Added a `TuiAltScreen` `copyOnSelect` option plus helpers to detect and copy the active fullscreen text selection programmatically ([#7720](https://github.com/earendil-works/pi/issues/7720)).
+
+### Fixed
+
+- Fixed main-screen rendering crashing when image-heavy output exceeded V8's string length limit ([#8028](https://github.com/earendil-works/pi/issues/8028)).
+- Fixed autocomplete ordering for nested results ([#8669](https://github.com/earendil-works/pi/pull/8669)).
+- Fixed fullscreen double-click word selection splitting paths and kebab-case tokens on `/` and `-` ([#7746](https://github.com/earendil-works/pi/issues/7746)).
+
+## [0.84.3] - 2026-08-24
+
 ### Fixed
 
 - Fixed duplicate fullscreen right-click paste in VS Code-based terminals on Windows ([#8186](https://github.com/earendil-works/pi/issues/8186)).
+- Fixed padded text exceeding narrow terminal widths ([#8252](https://github.com/earendil-works/pi/issues/8252)).
+- Fixed wrapped Markdown table links leaking color into borders and neighboring cells, including tables inside blockquotes ([#8335](https://github.com/earendil-works/pi/issues/8335)).
 - Fixed choppy and inconsistent `@` fuzzy file autocomplete in large repositories: the `fd` directory listing is cached per base directory and the walk is detached from keystroke aborts (fast typing no longer kills and respawns `fd` per keystroke), stale listings refresh in the background, extended queries narrow the previous match set instead of re-scoring the full listing, the listing cap was raised from 5,000 to 250,000 entries so results are complete and deterministic, and the attachment autocomplete debounce was raised from 20ms to 150ms so suggestions compute only after typing pauses.
+
 
 ## [0.84.2] - 2026-08-14
 

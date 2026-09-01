@@ -9,6 +9,7 @@ import type { ResourceDiagnostic } from "./diagnostics.ts";
 export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
+import { stripBom } from "../utils/text.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
 	clearExtensionCache,
@@ -58,7 +59,7 @@ function resolvePromptInput(input: string | undefined, description: string): str
 
 	if (existsSync(input)) {
 		try {
-			return readFileSync(input, "utf-8");
+			return stripBom(readFileSync(input, "utf-8"));
 		} catch (error) {
 			console.error(chalk.yellow(`Warning: Could not read ${description} file ${input}: ${error}`));
 			return input;
@@ -173,7 +174,7 @@ function loadContextFileFromDir(dir: string, warned: Set<string>): { path: strin
 				if (!statSync(filePath).isFile()) {
 					continue;
 				}
-				const content = readFileSync(filePath, "utf-8");
+				const content = stripBom(readFileSync(filePath, "utf-8"));
 				return {
 					path: filePath,
 					content: expandContextImports(
