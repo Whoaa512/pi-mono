@@ -106,7 +106,7 @@ export interface Settings {
 	retry?: RetrySettings;
 	refusalFallbackModel?: string; // Model pattern to offer when a model refuses a request (e.g. "anthropic/claude-opus-4-5"). Prompts before switching.
 	hideThinkingBlock?: boolean;
-	showCacheMissNotices?: boolean; // default: false - show prompt-cache miss and compaction cost notices
+	showCacheMissNotices?: boolean; // default: false - show cache cost and provider recovery notices
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows); supports leading ~ expansion
 	quietStartup?: boolean;

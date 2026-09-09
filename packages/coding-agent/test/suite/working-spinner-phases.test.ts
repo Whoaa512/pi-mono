@@ -79,6 +79,7 @@ function createSpinnerStub(): SpinnerStub {
 		updateEditorBorderColor: () => {},
 		checkShutdownRequested: async () => {},
 		maybeShowCacheMissNotice: () => {},
+		maybeShowAssistantDiagnostics: () => {},
 		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
 		getMarkdownTransformers: () => [],
 		getRegisteredToolDefinition: () => undefined,
