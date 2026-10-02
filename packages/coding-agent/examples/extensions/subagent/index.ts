@@ -547,7 +547,7 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
-	const settings = pi.getSettings("subagent");
+	const settings = pi.getExtensionSettings("subagent");
 	const MAX_PARALLEL_TASKS =
 		typeof settings.maxParallelTasks === "number" ? settings.maxParallelTasks : DEFAULT_MAX_PARALLEL_TASKS;
 	const MAX_CONCURRENCY =

@@ -8,7 +8,7 @@
  * - Edge cases and integration between parsing and substitution
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, describe, expect, test } from "vitest";
@@ -515,7 +515,7 @@ argument-hint: "<PR-URL>"
 You are given one or more GitHub PR URLs: $@`,
 		);
 
-		const templates = loadPromptTemplates({
+		const { templates } = loadPromptTemplates({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
 			promptPaths: [testDir],
@@ -538,7 +538,7 @@ argument-hint: "[instructions]"
 Wrap it. Additional instructions: $ARGUMENTS`,
 		);
 
-		const templates = loadPromptTemplates({
+		const { templates } = loadPromptTemplates({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
 			promptPaths: [testDir],
@@ -560,7 +560,7 @@ description: Audit changelog entries before release
 Audit changelog entries for all commits since the last release.`,
 		);
 
-		const templates = loadPromptTemplates({
+		const { templates } = loadPromptTemplates({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
 			promptPaths: [testDir],
@@ -582,7 +582,7 @@ argument-hint: ""
 Do something`,
 		);
 
-		const templates = loadPromptTemplates({
+		const { templates } = loadPromptTemplates({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
 			promptPaths: [testDir],
@@ -604,7 +604,7 @@ argument-hint: "<issue>"
 Analyze GitHub issue(s): $ARGUMENTS`,
 		);
 
-		const templates = loadPromptTemplates({
+		const { templates } = loadPromptTemplates({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
 			promptPaths: [testDir],
@@ -620,5 +620,29 @@ Analyze GitHub issue(s): $ARGUMENTS`,
 		try {
 			rmSync(testDir, { recursive: true, force: true });
 		} catch {}
+	});
+});
+
+describe("loadPromptTemplates - diagnostics", () => {
+	// Upstream #9354 rejects invalid YAML; the fork's resilient frontmatter parser loads it instead.
+	test("loads loose YAML frontmatter and keeps valid siblings", () => {
+		const testDir = mkdtempSync(join(tmpdir(), "pi-test-prompts-invalid-"));
+		try {
+			writeFileSync(join(testDir, "loose.md"), "---\ndescription: Broken: unquoted colon\n---\nDo something.\n");
+			writeFileSync(join(testDir, "valid.md"), "Valid prompt content.");
+
+			const { templates, diagnostics } = loadPromptTemplates({
+				cwd: process.cwd(),
+				agentDir: getAgentDir(),
+				promptPaths: [testDir],
+				includeDefaults: false,
+			});
+
+			expect(templates.map((template) => template.name)).toEqual(["loose", "valid"]);
+			expect(templates[0]?.description).toBe("Broken: unquoted colon");
+			expect(diagnostics).toEqual([]);
+		} finally {
+			rmSync(testDir, { recursive: true, force: true });
+		}
 	});
 });
