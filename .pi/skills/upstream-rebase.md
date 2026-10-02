@@ -100,7 +100,7 @@ The most dangerous regressions leave **no conflict marker**: when upstream edits
 
 ## 7. Rebuild the user's binary
 
-`~/bin/pi` symlinks to `packages/coding-agent/dist/cli.js`, so step 5's build already refreshes it. Note: `examples/extensions/*` are NOT bundled into `dist/` — they load from source via jiti, so ext fixes land on the user's next reload without a rebuild. Confirm:
+`~/bin/pi` is a node-pinned shell wrapper that execs `packages/coding-agent/dist/cli.js` (not a symlink; see `AGENTS.md`), so step 5's build already refreshes it. Rebuild again if you touched `src/` after the build. Note: `examples/extensions/*` are NOT bundled into `dist/` — they load from source via jiti, so ext fixes land on the user's next reload without a rebuild. Confirm:
 
 ```bash
 ls -la ~/bin/pi && pi --version
