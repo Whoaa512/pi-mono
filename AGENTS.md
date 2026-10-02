@@ -41,7 +41,7 @@
 - Never commit unless the user asks.
 
 ## CJ's Extension Tests
-- After rebasing on `upstream/main`, run: `npx vitest --run cj/tests/`
+- After rebasing on `upstream/main`, run: `npx vitest --run -c cj/tests/vitest.config.ts cj/tests/` (the config aliases `@earendil-works/*` to package sources; without it pi-tui imports fail)
 - These validate CJ's personal extensions (in `~/code/dotfiles/ai/pi/agent/extensions/`) against the core repo APIs
 
 ## Dependency and Install Security
