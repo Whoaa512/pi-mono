@@ -128,8 +128,6 @@
 - Fixed duplicate fullscreen right-click paste in VS Code-based terminals on Windows ([#8186](https://github.com/earendil-works/pi/issues/8186)).
 - Fixed padded text exceeding narrow terminal widths ([#8252](https://github.com/earendil-works/pi/issues/8252)).
 - Fixed wrapped Markdown table links leaking color into borders and neighboring cells, including tables inside blockquotes ([#8335](https://github.com/earendil-works/pi/issues/8335)).
-- Fixed choppy and inconsistent `@` fuzzy file autocomplete in large repositories: the `fd` directory listing is cached per base directory and the walk is detached from keystroke aborts (fast typing no longer kills and respawns `fd` per keystroke), stale listings refresh in the background, extended queries narrow the previous match set instead of re-scoring the full listing, the listing cap was raised from 5,000 to 250,000 entries so results are complete and deterministic, and the attachment autocomplete debounce was raised from 20ms to 150ms so suggestions compute only after typing pauses.
-
 
 ## [0.84.2] - 2026-08-14
 

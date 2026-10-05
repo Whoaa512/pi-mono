@@ -2156,7 +2156,7 @@ describe("Editor component", () => {
 					});
 					editor.setText(before);
 					editor.handleInput(trigger);
-					t.mock.timers.tick(149);
+					t.mock.timers.tick(19);
 					await flushAutocomplete();
 					assert.deepStrictEqual(requests, []);
 					t.mock.timers.tick(1);
@@ -2165,7 +2165,7 @@ describe("Editor component", () => {
 
 					editor.handleInput("r");
 					editor.handleInput("e");
-					t.mock.timers.tick(149);
+					t.mock.timers.tick(19);
 					await flushAutocomplete();
 					assert.strictEqual(requests.length, 1);
 					t.mock.timers.tick(1);
@@ -2212,7 +2212,7 @@ describe("Editor component", () => {
 			]) {
 				editor.setText("");
 				for (const char of text) editor.handleInput(char);
-				t.mock.timers.tick(150);
+				t.mock.timers.tick(20);
 				await flushAutocomplete();
 				assert.strictEqual(requests, 0, text);
 			}
@@ -2231,7 +2231,7 @@ describe("Editor component", () => {
 			});
 			const text = "查看，/path/";
 			for (const char of text) editor.handleInput(char);
-			t.mock.timers.tick(150);
+			t.mock.timers.tick(20);
 			await flushAutocomplete();
 			assert.deepStrictEqual(requests, []);
 			editor.handleInput("\t");
@@ -2279,7 +2279,7 @@ describe("Editor component", () => {
 					});
 					editor.setText(`${trigger}sr`);
 					editor.handleInput("c");
-					t.mock.timers.tick(150);
+					t.mock.timers.tick(20);
 					await flushAutocomplete();
 					assert.strictEqual(editor.isShowingAutocomplete(), true);
 					editor.handleInput(separator);
@@ -2287,7 +2287,7 @@ describe("Editor component", () => {
 					assert.deepStrictEqual(requests, [prefix, prefix + separator]);
 					assert.strictEqual(editor.isShowingAutocomplete(), false);
 					editor.handleInput("文");
-					t.mock.timers.tick(150);
+					t.mock.timers.tick(20);
 					await flushAutocomplete();
 					assert.deepStrictEqual(requests, [prefix, prefix + separator]);
 				}
@@ -2322,18 +2322,18 @@ describe("Editor component", () => {
 				assert.strictEqual(editor.isShowingAutocomplete(), false);
 
 				editor.handleInput("说");
-				t.mock.timers.tick(150);
+				t.mock.timers.tick(20);
 				await flushAutocomplete();
 				assert.strictEqual(editor.isShowingAutocomplete(), true);
 
 				for (const deletion of ["\x7f", "\x1b[3~"]) {
 					editor.handleInput("错");
-					t.mock.timers.tick(150);
+					t.mock.timers.tick(20);
 					await flushAutocomplete();
 					assert.strictEqual(editor.isShowingAutocomplete(), false);
 					if (deletion === "\x1b[3~") editor.handleInput("\x1b[D");
 					editor.handleInput(deletion);
-					t.mock.timers.tick(150);
+					t.mock.timers.tick(20);
 					await flushAutocomplete();
 					assert.strictEqual(editor.isShowingAutocomplete(), true);
 				}
@@ -2507,7 +2507,7 @@ describe("Editor component", () => {
 			assert.strictEqual(suggestionCalls, 0);
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2599,7 +2599,7 @@ describe("Editor component", () => {
 			assert.strictEqual(suggestionCalls, 0);
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2625,7 +2625,7 @@ describe("Editor component", () => {
 			editor.handleInput("k");
 
 			assert.strictEqual(suggestionCalls, 0);
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 1);
@@ -2651,7 +2651,7 @@ describe("Editor component", () => {
 
 			editor.handleInput("$");
 			editor.handleInput("s");
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 			await flushAutocomplete();
 
 			assert.strictEqual(suggestionCalls, 0);
@@ -2690,7 +2690,7 @@ describe("Editor component", () => {
 			editor.handleInput("i");
 			await new Promise((resolve) => setTimeout(resolve, 250));
 			editor.handleInput("n");
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 
 			assert.strictEqual(aborts, 1);
 		});

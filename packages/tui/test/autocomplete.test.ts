@@ -147,61 +147,6 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.deepStrictEqual(values, ["@README.md", "@src/"].sort());
 		});
 
-		test("reuses cached fd listing across keystrokes within TTL", async () => {
-			setupFolder(baseDir, {
-				files: {
-					"alpha.txt": "a",
-				},
-			});
-
-			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
-			const first = await getSuggestions(provider, ["@al"], 0, 3);
-			assert.ok(first?.items.some((item) => item.value === "@alpha.txt"));
-
-			// A file created after the first query is not visible while the
-			// cached listing is fresh — proving fd is not respawned per keystroke.
-			setupFolder(baseDir, {
-				files: {
-					"alpine.txt": "b",
-				},
-			});
-
-			const second = await getSuggestions(provider, ["@al"], 0, 3);
-			const values = second?.items.map((item) => item.value);
-			assert.ok(values?.includes("@alpha.txt"));
-			assert.ok(!values?.includes("@alpine.txt"), "new file should be served from cache, not a fresh fd walk");
-		});
-
-		test("incremental query narrowing returns same results as a direct query", async () => {
-			setupFolder(baseDir, {
-				files: {
-					"src/handlers/main.go": "package handlers",
-					"src/handshake.go": "package src",
-					"docs/handbook.md": "handbook",
-				},
-			});
-
-			const narrowingProvider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
-			let narrowed: Awaited<ReturnType<typeof getSuggestions>> = null;
-			for (const query of ["@h", "@ha", "@han", "@hand", "@handl"]) {
-				narrowed = await getSuggestions(narrowingProvider, [query], 0, query.length);
-			}
-
-			const directProvider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
-			const direct = await getSuggestions(directProvider, ["@handl"], 0, 6);
-
-			assert.deepStrictEqual(
-				narrowed?.items.map((item) => item.value),
-				direct?.items.map((item) => item.value),
-			);
-
-			// Backspacing (query shrinks) must fall back to the full listing.
-			const widened = await getSuggestions(narrowingProvider, ["@han"], 0, 4);
-			const widenedValues = widened?.items.map((item) => item.value);
-			assert.ok(widenedValues?.includes("@src/handshake.go"));
-			assert.ok(widenedValues?.includes("@docs/handbook.md"));
-		});
-
 		test("recognizes @ after CJK punctuation without consuming the preceding text", async () => {
 			setupFolder(baseDir, { files: { "README.md": "readme" } });
 			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
@@ -388,23 +333,6 @@ describe("CombinedAutocompleteProvider", () => {
 			assert.ok(!values?.includes("@src/utils/helpers.ts"));
 		});
 
-		test("fuzzy matches non-consecutive characters (e.g. imts -> interactive-mode.ts)", async () => {
-			setupFolder(baseDir, {
-				files: {
-					"src/interactive-mode.ts": "export {};",
-					"src/utils.ts": "export {};",
-					"src/index.ts": "export {};",
-				},
-			});
-
-			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
-			const line = "@imts";
-			const result = await getSuggestions(provider, [line], 0, line.length);
-
-			const values = result?.items.map((item) => item.value);
-			assert.ok(values?.includes("@src/interactive-mode.ts"));
-		});
-
 		test("scopes fuzzy search to relative directories and searches recursively", async () => {
 			setupFolder(outsideDir, {
 				files: {
@@ -461,11 +389,10 @@ describe("CombinedAutocompleteProvider", () => {
 		});
 
 		test("quotes paths containing whitespace or CJK punctuation for @ suggestions", async () => {
+			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
 			for (const separator of [" ", "\u3000", "，", "。"]) {
 				const directory = `my${separator}folder`;
 				setupFolder(baseDir, { files: { [`${directory}/test.txt`]: "content" } });
-				// Fresh provider per iteration: the fork caches the fd listing across keystrokes.
-				const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
 				const line = "@my";
 				const result = await getSuggestions(provider, [line], 0, line.length);
 				assert.ok(result);

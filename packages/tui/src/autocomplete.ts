@@ -246,20 +246,6 @@ async function walkDirectoryWithFd(
 	});
 }
 
-const FUZZY_LISTING_TTL_MS = 15_000;
-const FUZZY_LISTING_MAX_RESULTS = 250_000;
-
-interface FuzzyListingCacheEntry {
-	entries: Array<{ path: string; isDirectory: boolean }>;
-	fetchedAt: number;
-}
-
-interface FuzzyFilterCacheEntry {
-	entries: Array<{ path: string; isDirectory: boolean }>;
-	query: string;
-	matched: Array<{ path: string; isDirectory: boolean }>;
-}
-
 export interface AutocompleteItem {
 	value: string;
 	label: string;
@@ -311,11 +297,6 @@ export interface AutocompleteProvider {
 
 	// Check if file completion should trigger for explicit Tab completion
 	shouldTriggerFileCompletion?(lines: string[], cursorLine: number, cursorCol: number): boolean;
-
-	// Optionally warm any expensive suggestion sources (e.g. a directory
-	// listing) as soon as a trigger character is typed, ahead of the
-	// debounced suggestion request. Must be cheap and idempotent.
-	prewarmSuggestions?(): void;
 }
 
 // Combined provider that handles both slash commands and file paths
@@ -323,9 +304,6 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	private commands: (SlashCommand | AutocompleteItem)[];
 	private basePath: string;
 	private fdPath: string | null;
-	private fuzzyListingCache = new Map<string, FuzzyListingCacheEntry>();
-	private fuzzyListingWalks = new Map<string, Promise<Array<{ path: string; isDirectory: boolean }>>>();
-	private fuzzyFilterCache: FuzzyFilterCacheEntry | null = null;
 
 	constructor(commands: (SlashCommand | AutocompleteItem)[] = [], basePath: string, fdPath: string | null = null) {
 		this.commands = commands;
@@ -754,6 +732,42 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		}
 	}
 
+	// Score an entry against the query (higher = better match)
+	// isDirectory adds bonus to prioritize folders
+	private scoreEntry(filePath: string, query: string, isDirectory: boolean): number {
+		const fileName = basename(filePath);
+		const lowerFileName = fileName.toLowerCase();
+		const lowerQuery = query.toLowerCase();
+
+		let score = 0;
+
+		// Exact filename match (highest)
+		if (lowerFileName === lowerQuery) score = 100;
+		// Filename starts with query
+		else if (lowerFileName.startsWith(lowerQuery)) score = 80;
+		// Substring match in filename
+		else if (lowerFileName.includes(lowerQuery)) score = 50;
+		// Substring match in full path
+		else if (filePath.toLowerCase().includes(lowerQuery)) score = 30;
+
+		// Directories get a bonus to appear first
+		if (isDirectory && score > 0) score += 10;
+
+		return score;
+	}
+
+	private async getBaseDirSuggestions(
+		baseDir: string,
+		query: string,
+		signal: AbortSignal,
+	): Promise<Array<{ path: string; isDirectory: boolean }>> {
+		if (!this.fdPath || signal.aborted) {
+			return [];
+		}
+
+		return await walkDirectoryWithFd(baseDir, this.fdPath, query, 100, signal, 1);
+	}
+
 	// Fuzzy file search using fd (fast, respects .gitignore)
 	private async getFuzzyFileSuggestions(
 		query: string,
@@ -767,29 +781,43 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			const scopedQuery = this.resolveScopedFuzzyQuery(query);
 			const fdBaseDir = scopedQuery?.baseDir ?? this.basePath;
 			const fdQuery = scopedQuery?.query ?? query;
-			const entries = await this.getFuzzyListing(fdBaseDir, options.signal);
+			const baseDirEntries = await this.getBaseDirSuggestions(fdBaseDir, fdQuery, options.signal);
+			const recursiveEntries = await walkDirectoryWithFd(fdBaseDir, this.fdPath, fdQuery, 100, options.signal);
+			const seenPaths = new Set(baseDirEntries.map((entry) => entry.path));
+			const entries = [
+				...baseDirEntries,
+				...recursiveEntries.filter((entry) => {
+					if (seenPaths.has(entry.path)) return false;
+					seenPaths.add(entry.path);
+					return true;
+				}),
+			];
 			if (options.signal.aborted) {
 				return [];
 			}
 
-			let topEntries: Array<{ path: string; isDirectory: boolean }>;
-			if (fdQuery) {
-				// Extending a query can only shrink the match set (every token of the
-				// shorter query is a prefix of a token of the longer one, and
-				// subsequence matching is monotonic), so narrow the previous matches
-				// instead of re-scoring the full listing.
-				const previous = this.fuzzyFilterCache;
-				const candidates =
-					previous && previous.entries === entries && previous.query && fdQuery.startsWith(previous.query)
-						? previous.matched
-						: entries;
-				const matched = fuzzyFilter(candidates, fdQuery, (entry) => entry.path);
-				this.fuzzyFilterCache = { entries, query: fdQuery, matched };
-				topEntries = matched.slice(0, 20);
-			} else {
-				this.fuzzyFilterCache = null;
-				topEntries = entries.slice(0, 20);
-			}
+			const scoredEntries = entries
+				.map((entry) => ({
+					...entry,
+					score: fdQuery ? this.scoreEntry(entry.path, fdQuery, entry.isDirectory) : 1,
+				}))
+				.filter((entry) => entry.score > 0);
+
+			scoredEntries.sort((a, b) => {
+				const scoreDiff = b.score - a.score;
+				if (scoreDiff !== 0) return scoreDiff;
+
+				const aDepth = toDisplayPath(a.path).split("/").filter(Boolean).length;
+				const bDepth = toDisplayPath(b.path).split("/").filter(Boolean).length;
+				const depthDiff = aDepth - bDepth;
+				if (depthDiff !== 0) return depthDiff;
+
+				const lengthDiff = a.path.length - b.path.length;
+				if (lengthDiff !== 0) return lengthDiff;
+
+				return a.path.localeCompare(b.path);
+			});
+			const topEntries = scoredEntries.slice(0, 20);
 
 			const suggestions: AutocompleteItem[] = [];
 			for (const { path: entryPath, isDirectory } of topEntries) {
@@ -816,83 +844,6 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		} catch {
 			return [];
 		}
-	}
-
-	// Cached fd listing per base directory. The fd walk is query-independent
-	// (fuzzy matching happens in JS), so repeat keystrokes reuse the same
-	// listing instead of respawning fd and re-walking the repo.
-	private async getFuzzyListing(
-		baseDir: string,
-		signal: AbortSignal,
-	): Promise<Array<{ path: string; isDirectory: boolean }>> {
-		if (!this.fdPath) {
-			return [];
-		}
-
-		const cached = this.fuzzyListingCache.get(baseDir);
-		if (cached) {
-			// Serve the cached listing immediately, even when stale. A stale
-			// listing refreshes in the background (deduped by the in-flight walk
-			// map) so keystrokes never block on a directory walk once a listing
-			// exists.
-			if (Date.now() - cached.fetchedAt >= FUZZY_LISTING_TTL_MS) {
-				void this.walkAndCacheListing(baseDir);
-			}
-			return cached.entries;
-		}
-
-		// The walk is intentionally detached from the request signal: aborting a
-		// keystroke's request must not kill the fd process, otherwise fast typing
-		// respawns and kills fd on every keystroke and the cache never fills.
-		// Concurrent requests share the same in-flight walk.
-		const entries = await this.walkAndCacheListing(baseDir);
-		if (signal.aborted) {
-			return [];
-		}
-		return entries;
-	}
-
-	private walkAndCacheListing(baseDir: string): Promise<Array<{ path: string; isDirectory: boolean }>> {
-		const inFlight = this.fuzzyListingWalks.get(baseDir);
-		if (inFlight) {
-			return inFlight;
-		}
-
-		if (!this.fdPath) {
-			return Promise.resolve([]);
-		}
-
-		const walk = walkDirectoryWithFd(
-			baseDir,
-			this.fdPath,
-			"",
-			FUZZY_LISTING_MAX_RESULTS,
-			new AbortController().signal,
-		)
-			.then((entries) => {
-				this.fuzzyListingCache.set(baseDir, { entries, fetchedAt: Date.now() });
-				return entries;
-			})
-			.finally(() => {
-				this.fuzzyListingWalks.delete(baseDir);
-			});
-		this.fuzzyListingWalks.set(baseDir, walk);
-		return walk;
-	}
-
-	// Kick off the fd walk for the working directory the moment a trigger
-	// character is typed, so the listing is warm by the time the debounced
-	// suggestion request runs. No-op when a fresh listing or in-flight walk
-	// already exists.
-	prewarmSuggestions(): void {
-		if (!this.fdPath) {
-			return;
-		}
-		const cached = this.fuzzyListingCache.get(this.basePath);
-		if (cached && Date.now() - cached.fetchedAt < FUZZY_LISTING_TTL_MS) {
-			return;
-		}
-		void this.walkAndCacheListing(this.basePath);
 	}
 
 	// Check if we should trigger file completion (called on Tab key)
