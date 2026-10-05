@@ -624,11 +624,12 @@ Analyze GitHub issue(s): $ARGUMENTS`,
 });
 
 describe("loadPromptTemplates - diagnostics", () => {
-	// Upstream #9354 rejects invalid YAML; the fork's resilient frontmatter parser loads it instead.
-	test("loads loose YAML frontmatter and keeps valid siblings", () => {
+	// Regression test for #9354.
+	test("reports invalid YAML frontmatter and keeps valid siblings", () => {
 		const testDir = mkdtempSync(join(tmpdir(), "pi-test-prompts-invalid-"));
+		const invalidPromptPath = join(testDir, "invalid.md");
 		try {
-			writeFileSync(join(testDir, "loose.md"), "---\ndescription: Broken: unquoted colon\n---\nDo something.\n");
+			writeFileSync(invalidPromptPath, "---\ndescription: Broken: unquoted colon\n---\nDo something.\n");
 			writeFileSync(join(testDir, "valid.md"), "Valid prompt content.");
 
 			const { templates, diagnostics } = loadPromptTemplates({
@@ -638,9 +639,14 @@ describe("loadPromptTemplates - diagnostics", () => {
 				includeDefaults: false,
 			});
 
-			expect(templates.map((template) => template.name)).toEqual(["loose", "valid"]);
-			expect(templates[0]?.description).toBe("Broken: unquoted colon");
-			expect(diagnostics).toEqual([]);
+			expect(templates.map((template) => template.name)).toEqual(["valid"]);
+			expect(diagnostics).toEqual([
+				expect.objectContaining({
+					type: "warning",
+					path: invalidPromptPath,
+					message: expect.stringContaining("line 1, column 14"),
+				}),
+			]);
 		} finally {
 			rmSync(testDir, { recursive: true, force: true });
 		}
