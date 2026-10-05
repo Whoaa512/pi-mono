@@ -1,119 +1,48 @@
 /**
  * Request-lifecycle text of the working spinner (waiting -> streaming -> retry countdown).
  *
- * The spinner lives in `InteractiveMode`, which the harness does not construct, so these
- * tests drive `InteractiveMode.prototype.handleEvent` with a stub `this` and feed it real
- * `AgentSession` events from the harness. Not covered here: actual `Loader` rendering,
- * terminal output, and escape/interrupt handling — those need a TUI-level test.
+ * Tests `WorkingSpinnerPhases` directly, fed either real `AgentSession` events from the
+ * harness or hand-built events. `InteractiveMode` is deliberately not involved: its only
+ * job is to forward session events here and push the resulting text into the status
+ * indicator. Not covered: that wiring, `Loader` rendering, and escape/interrupt handling.
  */
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
-import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
-import { getMarkdownTheme, initTheme } from "../../src/modes/interactive/theme/theme.ts";
+import { keyText } from "../../src/modes/interactive/components/keybinding-hints.ts";
+import { truncateRetryError, WorkingSpinnerPhases } from "../../src/modes/interactive/working-spinner-phases.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
-interface SpinnerStub {
-	messages: string[];
-	workingMessage: string | undefined;
-	workingPhaseMessage: string | undefined;
-	retryPhaseCountdown: { dispose: () => void } | undefined;
-	handle: (event: AgentSessionEvent) => Promise<void>;
-	currentMessage: () => string;
+const HINT = `(${keyText("app.interrupt")} to interrupt)`;
+const WAITING = `Waiting for response... ${HINT}`;
+const STREAMING = `Working... ${HINT}`;
+const DEFAULT = "Working...";
+
+function createSpinner() {
+	const state: { extensionMessage: string | undefined } = { extensionMessage: undefined };
+	/** Every text the spinner was told to show, in order. */
+	const shown: string[] = [];
+	const phases = new WorkingSpinnerPhases({
+		defaultMessage: DEFAULT,
+		getTui: () => undefined,
+		getExtensionMessage: () => state.extensionMessage,
+		onMessageChange: (message) => shown.push(message),
+	});
+	return { state, shown, phases };
 }
 
-function createSpinnerStub(): SpinnerStub {
-	const messages: string[] = [];
-	const prototype = InteractiveMode.prototype as unknown as {
-		handleEvent(event: AgentSessionEvent): Promise<void>;
-		setWorkingPhaseMessage(message: string | undefined): void;
-		clearRetryPhaseCountdown(): void;
-		waitingForResponseMessage(): string;
-	};
-	const currentWorkingMessage = Object.getOwnPropertyDescriptor(
-		InteractiveMode.prototype,
-		"currentWorkingMessage",
-	)?.get;
-	if (!currentWorkingMessage) throw new Error("currentWorkingMessage getter not found");
+const agentStart: AgentSessionEvent = { type: "agent_start" };
+const turnStart: AgentSessionEvent = { type: "turn_start" };
+const agentEnd: AgentSessionEvent = { type: "agent_end", messages: [], willRetry: false };
+const assistantStart: AgentSessionEvent = { type: "message_start", message: fauxAssistantMessage("done") };
 
-	// Partial stand-in for InteractiveMode internals; only the spinner-relevant members are real.
-	const fakeThis: any = {
-		isInitialized: true,
-		footer: { invalidate: () => {} },
-		settingsManager: {
-			getShowTerminalProgress: () => false,
-			getCodeBlockIndent: () => 0,
-			getShowImages: () => false,
-			getImageWidthCells: () => 0,
-		},
-		ui: { requestRender: () => {}, terminal: { setProgress: () => {} } },
-		session: { isStreaming: true },
-		sessionManager: { getCwd: () => "/tmp" },
-		// Keeps `agent_start` off the WorkingStatusIndicator construction path (needs a real TUI).
-		workingVisible: false,
-		activeStatusIndicator: {
-			kind: "working",
-			setMessage: (message: string) => messages.push(message),
-		},
-		workingMessage: undefined,
-		workingPhaseMessage: undefined,
-		retryPhaseCountdown: undefined,
-		defaultWorkingMessage: "Working...",
-		hideThinkingBlock: false,
-		hiddenThinkingLabel: "Thinking...",
-		outputPad: 1,
-		toolOutputExpanded: false,
-		pendingTools: new Map(),
-		streamingComponent: undefined,
-		streamingMessage: undefined,
-		chatContainer: { addChild: () => {}, removeChild: () => {}, children: [] },
-		retryEscapeHandler: undefined,
-		defaultEditor: { onEscape: undefined },
-		clearStatusIndicator: () => {},
-		showStatusIndicator: () => {},
-		updatePendingMessagesDisplay: () => {},
-		updateTerminalTitle: () => {},
-		addMessageToChat: () => {},
-		addCustomEntryToChat: () => {},
-		updateEditorBorderColor: () => {},
-		checkShutdownRequested: async () => {},
-		maybeShowCacheMissNotice: () => {},
-		maybeShowThinkingDropNotice: () => {},
-		maybeShowAssistantDiagnostics: () => {},
-		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
-		getMarkdownTransformers: () => [],
-		getRegisteredToolDefinition: () => undefined,
-		setWorkingPhaseMessage: (message: string | undefined) => prototype.setWorkingPhaseMessage.call(fakeThis, message),
-		clearRetryPhaseCountdown: () => prototype.clearRetryPhaseCountdown.call(fakeThis),
-		waitingForResponseMessage: () => prototype.waitingForResponseMessage.call(fakeThis),
-	};
-
-	return {
-		messages,
-		get workingMessage() {
-			return fakeThis.workingMessage;
-		},
-		set workingMessage(message: string | undefined) {
-			fakeThis.workingMessage = message;
-		},
-		get workingPhaseMessage() {
-			return fakeThis.workingPhaseMessage;
-		},
-		get retryPhaseCountdown() {
-			return fakeThis.retryPhaseCountdown;
-		},
-		handle: (event) => prototype.handleEvent.call(fakeThis, event),
-		currentMessage: () => currentWorkingMessage.call(fakeThis) as string,
-	};
+function retry(attempt: number, maxRetries: number, delayMs: number, errorMessage: string): AgentSessionEvent {
+	return { type: "retry", attempt, maxRetries, delayMs, errorMessage };
 }
 
 describe("working spinner request phases", () => {
 	const harnesses: Harness[] = [];
-
-	beforeAll(() => {
-		initTheme("dark");
-	});
 
 	afterEach(() => {
 		vi.useRealTimers();
@@ -122,86 +51,144 @@ describe("working spinner request phases", () => {
 		}
 	});
 
-	it("shows waiting text until the first assistant message, then streaming text", async () => {
+	it("shows waiting text until the first assistant message, then streaming text, then the default", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		const spinner = createSpinnerStub();
-		const phaseAtEvent: string[] = [];
-		harness.session.subscribe(async (event) => {
-			await spinner.handle(event);
-			if (event.type === "agent_start" || (event.type === "message_start" && event.message.role === "assistant")) {
-				phaseAtEvent.push(`${event.type}:${spinner.currentMessage()}`);
-			}
-		});
+		const { shown, phases } = createSpinner();
+		harness.session.subscribe((event) => phases.handleEvent(event));
 
 		harness.setResponses([fauxAssistantMessage("hello")]);
 		await harness.session.prompt("test");
 
-		expect(phaseAtEvent[0]).toMatch(/^agent_start:Waiting for response\.\.\./);
-		expect(phaseAtEvent[1]).toMatch(/^message_start:Working\.\.\./);
-		// agent_end clears the phase text back to the default.
-		expect(spinner.workingPhaseMessage).toBeUndefined();
-		expect(spinner.currentMessage()).toBe("Working...");
+		// agent_start and turn_start both (re)set the waiting text.
+		expect(shown).toEqual([WAITING, WAITING, STREAMING, DEFAULT]);
+		expect(phases.currentMessage).toBe(DEFAULT);
 	});
 
-	it("flips to streaming text for providers that emit no message_update", async () => {
-		const spinner = createSpinnerStub();
+	it("shows a provider retry between waiting and streaming for a real session", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const { shown, phases } = createSpinner();
+		harness.session.subscribe((event) => phases.handleEvent(event));
 
-		await spinner.handle({ type: "agent_start" } as AgentSessionEvent);
-		expect(spinner.currentMessage()).toMatch(/^Waiting for response\.\.\./);
+		harness.setResponses([
+			(_context, options) => {
+				options?.onRetry?.({ attempt: 1, maxRetries: 5, delayMs: 4000, error: new Error("overloaded_error") });
+				return fauxAssistantMessage("recovered");
+			},
+		]);
+		await harness.session.prompt("test");
 
-		await spinner.handle({
+		expect(shown).toEqual([WAITING, WAITING, `Retrying (1/5) in 4s (overloaded_error) ${HINT}`, STREAMING, DEFAULT]);
+	});
+
+	it("flips to streaming text on assistant message_start alone (providers that emit no message_update)", () => {
+		const { phases } = createSpinner();
+
+		phases.handleEvent(agentStart);
+		expect(phases.currentMessage).toBe(WAITING);
+
+		phases.handleEvent({
 			type: "message_start",
-			message: { ...fauxAssistantMessage("done"), role: "assistant" },
-		} as AgentSessionEvent);
+			message: { role: "user", content: "hi", timestamp: 0 },
+		});
+		expect(phases.currentMessage).toBe(WAITING);
 
-		expect(spinner.currentMessage()).toMatch(/^Working\.\.\./);
+		phases.handleEvent(assistantStart);
+		expect(phases.currentMessage).toBe(STREAMING);
 	});
 
-	it("counts down a provider retry and tears the countdown down on agent_end", async () => {
+	it("resets to waiting text on turn_start", () => {
+		const { phases } = createSpinner();
+
+		phases.handleEvent(agentStart);
+		phases.handleEvent(assistantStart);
+		expect(phases.currentMessage).toBe(STREAMING);
+
+		phases.handleEvent(turnStart);
+		expect(phases.currentMessage).toBe(WAITING);
+	});
+
+	it("counts down a provider retry and tears the countdown down on agent_end", () => {
 		vi.useFakeTimers();
-		const spinner = createSpinnerStub();
+		const { shown, phases } = createSpinner();
 
-		await spinner.handle({ type: "agent_start" } as AgentSessionEvent);
-		await spinner.handle({
-			type: "retry",
-			attempt: 1,
-			maxRetries: 5,
-			delayMs: 3000,
-			errorMessage: "429 overloaded",
-		} as AgentSessionEvent);
+		phases.handleEvent(agentStart);
+		phases.handleEvent(retry(1, 5, 3000, "429 overloaded"));
+		expect(phases.currentMessage).toBe(`Retrying (1/5) in 3s (429 overloaded) ${HINT}`);
 
-		expect(spinner.currentMessage()).toContain("Retrying (1/5) in 3s (429 overloaded)");
-		expect(spinner.retryPhaseCountdown).toBeDefined();
+		vi.advanceTimersByTime(1000);
+		expect(phases.currentMessage).toBe(`Retrying (1/5) in 2s (429 overloaded) ${HINT}`);
 
-		await vi.advanceTimersByTimeAsync(1000);
-		expect(spinner.currentMessage()).toContain("Retrying (1/5) in 2s");
-
-		await spinner.handle({ type: "agent_end" } as AgentSessionEvent);
-		expect(spinner.retryPhaseCountdown).toBeUndefined();
-		expect(spinner.workingPhaseMessage).toBeUndefined();
+		phases.handleEvent(agentEnd);
+		expect(phases.currentMessage).toBe(DEFAULT);
 
 		// The disposed countdown must not keep writing spinner text.
-		const messageCount = spinner.messages.length;
-		await vi.advanceTimersByTimeAsync(5000);
-		expect(spinner.messages.length).toBe(messageCount);
+		const shownCount = shown.length;
+		vi.advanceTimersByTime(5000);
+		expect(shown.length).toBe(shownCount);
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("keeps an extension-set working message ahead of phase text", async () => {
-		const spinner = createSpinnerStub();
-		spinner.workingMessage = "Extension busy...";
+	it("returns to waiting text when the retry countdown expires", () => {
+		vi.useFakeTimers();
+		const { phases } = createSpinner();
 
-		await spinner.handle({ type: "agent_start" } as AgentSessionEvent);
-		await spinner.handle({
-			type: "retry",
-			attempt: 2,
-			maxRetries: 3,
-			delayMs: 1000,
-			errorMessage: "500 boom",
-		} as AgentSessionEvent);
+		phases.handleEvent(retry(1, 5, 2000, "boom"));
+		vi.advanceTimersByTime(2000);
 
-		expect(spinner.currentMessage()).toBe("Extension busy...");
-		expect(spinner.messages).toEqual([]);
-		expect(spinner.workingPhaseMessage).toContain("Retrying (2/3)");
+		expect(phases.currentMessage).toBe(WAITING);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it.each([
+		["turn_start", turnStart, WAITING],
+		["assistant message_start", assistantStart, STREAMING],
+		["a newer retry", retry(2, 5, 9000, "again"), `Retrying (2/5) in 9s (again) ${HINT}`],
+	])("stops a running retry countdown on %s", (_name, event, expected) => {
+		vi.useFakeTimers();
+		const { phases } = createSpinner();
+
+		phases.handleEvent(retry(1, 5, 3000, "boom"));
+		phases.handleEvent(event);
+		expect(phases.currentMessage).toBe(expected);
+
+		// The first countdown would have rewritten the text after 1s if still running.
+		vi.advanceTimersByTime(999);
+		expect(phases.currentMessage).toBe(expected);
+	});
+
+	it("dispose stops the countdown without touching the text", () => {
+		vi.useFakeTimers();
+		const { shown, phases } = createSpinner();
+
+		phases.handleEvent(retry(1, 5, 3000, "boom"));
+		phases.dispose();
+		vi.advanceTimersByTime(5000);
+
+		expect(shown).toEqual([`Retrying (1/5) in 3s (boom) ${HINT}`]);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("keeps an extension-set working message ahead of phase text", () => {
+		vi.useFakeTimers();
+		const { state, shown, phases } = createSpinner();
+		state.extensionMessage = "Extension busy...";
+
+		phases.handleEvent(agentStart);
+		phases.handleEvent(retry(2, 3, 1000, "500 boom"));
+
+		expect(phases.currentMessage).toBe("Extension busy...");
+		expect(shown).toEqual([]);
+
+		// The phase kept tracking underneath and shows once the extension message is cleared.
+		state.extensionMessage = undefined;
+		expect(phases.currentMessage).toBe(`Retrying (2/3) in 1s (500 boom) ${HINT}`);
+	});
+
+	it("collapses whitespace and truncates long retry reasons to 60 characters", () => {
+		expect(truncateRetryError("  rate\n limited \t now ")).toBe("rate limited now");
+		expect(truncateRetryError("x".repeat(60))).toBe("x".repeat(60));
+		expect(truncateRetryError("x".repeat(61))).toBe(`${"x".repeat(59)}…`);
 	});
 });

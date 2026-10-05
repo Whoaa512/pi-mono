@@ -139,7 +139,6 @@ import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.ts";
-import { CountdownTimer } from "./components/countdown-timer.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
@@ -201,6 +200,7 @@ import {
 } from "./theme/theme.ts";
 import { InteractiveThemeController } from "./theme/theme-controller.ts";
 import { createInteractiveTui, createInteractiveTuiReference } from "./tui-renderer.ts";
+import { WorkingSpinnerPhases } from "./working-spinner-phases.ts";
 
 export { createInteractiveTui, createInteractiveTuiReference } from "./tui-renderer.ts";
 
@@ -282,16 +282,6 @@ function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionE
 
 function isCompactionCostNotice(item: RenderSessionItem): item is CompactionCostNotice {
 	return "type" in item && item.type === "compaction_cost";
-}
-
-const MAX_RETRY_REASON_LENGTH = 60;
-
-function truncateRetryError(message: string): string {
-	const singleLine = message.replace(/\s+/g, " ").trim();
-	if (singleLine.length <= MAX_RETRY_REASON_LENGTH) {
-		return singleLine;
-	}
-	return `${singleLine.slice(0, MAX_RETRY_REASON_LENGTH - 1)}…`;
 }
 
 function isUsageSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "usage" }> {
@@ -492,9 +482,16 @@ export class InteractiveMode {
 	private workingVisible = true;
 	private workingIndicatorOptions: WorkingIndicatorOptions | undefined = undefined;
 	private readonly defaultWorkingMessage = "Working...";
-	// Request-lifecycle text for the working spinner. Only used when no extension set a custom message.
-	private workingPhaseMessage: string | undefined = undefined;
-	private retryPhaseCountdown: CountdownTimer | undefined = undefined;
+	private readonly workingPhases = new WorkingSpinnerPhases({
+		defaultMessage: this.defaultWorkingMessage,
+		getTui: () => this.ui,
+		getExtensionMessage: () => this.workingMessage,
+		onMessageChange: (message) => {
+			if (this.activeStatusIndicator?.kind !== "working") return;
+			this.activeStatusIndicator.setMessage(message);
+			this.ui.requestRender();
+		},
+	});
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
@@ -2319,7 +2316,7 @@ export class InteractiveMode {
 					(this.editor.borderColor ?? theme.getThinkingBorderColor(this.session.thinkingLevel || "off"))(text)
 			: undefined;
 		this.showStatusIndicator(
-			new WorkingStatusIndicator(this.ui, this.currentWorkingMessage, this.workingIndicatorOptions, colorFn),
+			new WorkingStatusIndicator(this.ui, this.workingPhases.currentMessage, this.workingIndicatorOptions, colorFn),
 		);
 	}
 
@@ -2334,29 +2331,6 @@ export class InteractiveMode {
 			this.showWorkingStatusIndicator();
 		}
 		this.ui.requestRender();
-	}
-
-	/** Spinner text: an extension-set message wins, then the request-lifecycle phase, then the default. */
-	private get currentWorkingMessage(): string {
-		return this.workingMessage ?? this.workingPhaseMessage ?? this.defaultWorkingMessage;
-	}
-
-	private setWorkingPhaseMessage(message: string | undefined): void {
-		this.workingPhaseMessage = message;
-		if (this.workingMessage !== undefined) return;
-		if (this.activeStatusIndicator?.kind === "working") {
-			this.activeStatusIndicator.setMessage(this.currentWorkingMessage);
-			this.ui.requestRender();
-		}
-	}
-
-	private waitingForResponseMessage(): string {
-		return `Waiting for response... (${keyText("app.interrupt")} to interrupt)`;
-	}
-
-	private clearRetryPhaseCountdown(): void {
-		this.retryPhaseCountdown?.dispose();
-		this.retryPhaseCountdown = undefined;
 	}
 
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
@@ -2463,7 +2437,7 @@ export class InteractiveMode {
 		this.workingVisible = true;
 		this.setWorkingIndicator();
 		if (this.activeStatusIndicator?.kind === "working") {
-			this.activeStatusIndicator.setMessage(this.currentWorkingMessage);
+			this.activeStatusIndicator.setMessage(this.workingPhases.currentMessage);
 		}
 		this.setHiddenThinkingLabel();
 	}
@@ -2627,7 +2601,7 @@ export class InteractiveMode {
 			setWorkingMessage: (message) => {
 				this.workingMessage = message;
 				if (this.activeStatusIndicator?.kind === "working") {
-					this.activeStatusIndicator.setMessage(this.currentWorkingMessage);
+					this.activeStatusIndicator.setMessage(this.workingPhases.currentMessage);
 				}
 			},
 			setWorkingVisible: (visible) => this.setWorkingVisible(visible),
@@ -3382,6 +3356,7 @@ export class InteractiveMode {
 
 	private subscribeToAgent(): void {
 		this.unsubscribe = this.session.subscribe(async (event) => {
+			this.workingPhases.handleEvent(event);
 			await this.handleEvent(event);
 		});
 	}
@@ -3402,14 +3377,9 @@ export class InteractiveMode {
 					this.defaultEditor.onEscape = this.retryEscapeHandler;
 					this.retryEscapeHandler = undefined;
 				}
-				this.clearRetryPhaseCountdown();
-				this.setWorkingPhaseMessage(this.waitingForResponseMessage());
 				break;
 
 			case "turn_start":
-				// A new provider request starts for this turn; nothing has been received yet.
-				this.clearRetryPhaseCountdown();
-				this.setWorkingPhaseMessage(this.waitingForResponseMessage());
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}
@@ -3493,10 +3463,6 @@ export class InteractiveMode {
 					this.updatePendingMessagesDisplay();
 					this.ui.requestRender();
 				} else if (event.message.role === "assistant") {
-					// First provider bytes arrived; the request is no longer pending. Providers that
-					// emit only `done` never produce a `message_update`, so the flip lives here.
-					this.clearRetryPhaseCountdown();
-					this.setWorkingPhaseMessage(`${this.defaultWorkingMessage} (${keyText("app.interrupt")} to interrupt)`);
 					this.streamingComponent = new AssistantMessageComponent(
 						undefined,
 						this.hideThinkingBlock,
@@ -3511,28 +3477,6 @@ export class InteractiveMode {
 					this.ui.requestRender();
 				}
 				break;
-
-			case "retry": {
-				const reason = truncateRetryError(event.errorMessage);
-				this.clearRetryPhaseCountdown();
-				// Deliberately shown on the working spinner instead of `RetryStatusIndicator`: that
-				// indicator covers harness-level retries of a whole operation, while this is an
-				// intra-request retry inside a still-active provider call. Copy style is kept aligned.
-				this.retryPhaseCountdown = new CountdownTimer(
-					event.delayMs,
-					this.ui,
-					(seconds) => {
-						this.setWorkingPhaseMessage(
-							`Retrying (${event.attempt}/${event.maxRetries}) in ${seconds}s (${reason}) (${keyText("app.interrupt")} to interrupt)`,
-						);
-					},
-					() => {
-						this.retryPhaseCountdown = undefined;
-						this.setWorkingPhaseMessage(this.waitingForResponseMessage());
-					},
-				);
-				break;
-			}
 
 			case "message_update":
 				if (this.streamingComponent && event.message.role === "assistant") {
@@ -3664,8 +3608,6 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				this.clearRetryPhaseCountdown();
-				this.setWorkingPhaseMessage(undefined);
 				this.clearStatusIndicator("working");
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
@@ -7132,7 +7074,7 @@ export class InteractiveMode {
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}
-		this.clearRetryPhaseCountdown();
+		this.workingPhases.dispose();
 		this.clearStatusIndicator();
 		this.themeController.disableAutoSync();
 		this.clearExtensionTerminalInputListeners();
