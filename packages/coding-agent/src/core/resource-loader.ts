@@ -1,5 +1,4 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { detectCapabilities, getTerminalColorMode, type TerminalColorMode } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -182,103 +181,7 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-/** Max number of `@import` hops followed from a context file, matching Claude Code. */
-const MAX_CONTEXT_IMPORT_DEPTH = 5;
-
-/** `@` followed by a whitespace-free token containing a path separator. */
-const CONTEXT_IMPORT_PATTERN = /(^|\s)@(?=[^\s]*\/)([^\s]+)/g;
-
-/** Inline code spans, captured so they can be skipped during expansion. */
-const INLINE_CODE_PATTERN = /(`+[^`]*`+)/;
-
-function expandContextImports(
-	content: string,
-	containingDir: string,
-	depth: number,
-	chain: Set<string>,
-	warned: Set<string>,
-): string {
-	if (depth >= MAX_CONTEXT_IMPORT_DEPTH) {
-		return content;
-	}
-
-	let fenceMarker: string | undefined;
-	const lines = content.split("\n").map((line) => {
-		const fence = line.trimStart().match(/^(```+|~~~+)/);
-		if (fence) {
-			const marker = fence[1][0];
-			if (!fenceMarker) {
-				fenceMarker = marker;
-			} else if (fenceMarker === marker) {
-				fenceMarker = undefined;
-			}
-			return line;
-		}
-		if (fenceMarker) {
-			return line;
-		}
-		return line
-			.split(INLINE_CODE_PATTERN)
-			.map((segment, index) =>
-				index % 2 === 1 ? segment : expandImportsInText(segment, containingDir, depth, chain, warned),
-			)
-			.join("");
-	});
-
-	return lines.join("\n");
-}
-
-function isReadableFile(filePath: string): boolean {
-	try {
-		return statSync(filePath).isFile();
-	} catch {
-		return false;
-	}
-}
-
-function expandImportsInText(
-	text: string,
-	containingDir: string,
-	depth: number,
-	chain: Set<string>,
-	warned: Set<string>,
-): string {
-	return text.replace(CONTEXT_IMPORT_PATTERN, (match, prefix: string, reference: string) => {
-		if (reference.includes("://")) {
-			return match;
-		}
-
-		const importPath = resolvePath(reference, containingDir);
-		const realPath = canonicalizePath(importPath);
-		if (chain.has(realPath)) {
-			return match;
-		}
-
-		// Prose and scoped package names look like imports (`@typescript/native-preview`,
-		// "the @/some/dir directory"). Only a real file is an import; anything else stays literal
-		// and stays quiet, or every session warns about ordinary text.
-		if (!isReadableFile(importPath)) {
-			return match;
-		}
-
-		let imported: string;
-		try {
-			imported = readFileSync(importPath, "utf-8");
-		} catch (error) {
-			if (!warned.has(realPath)) {
-				warned.add(realPath);
-				console.error(chalk.yellow(`Warning: Could not read imported context file ${importPath}: ${error}`));
-			}
-			return match;
-		}
-
-		const nestedChain = new Set(chain);
-		nestedChain.add(realPath);
-		return prefix + expandContextImports(imported, dirname(importPath), depth + 1, nestedChain, warned);
-	});
-}
-
-function loadContextFileFromDir(dir: string, warned: Set<string>): { path: string; content: string } | null {
+function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
 	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
@@ -287,16 +190,9 @@ function loadContextFileFromDir(dir: string, warned: Set<string>): { path: strin
 				if (!statSync(filePath).isFile()) {
 					continue;
 				}
-				const content = stripBom(readFileSync(filePath, "utf-8"));
 				return {
 					path: filePath,
-					content: expandContextImports(
-						content,
-						dirname(canonicalizePath(filePath)),
-						0,
-						new Set([canonicalizePath(filePath)]),
-						warned,
-					),
+					content: stripBom(readFileSync(filePath, "utf-8")),
 				};
 			} catch (error) {
 				console.error(chalk.yellow(`Warning: Could not read ${filePath}: ${error}`));
@@ -329,7 +225,7 @@ function findShadowedContextFile(cwd: string): string | undefined {
 	// `proj/main`) it is just the directory holding `.bare`, which tracks nothing; a
 	// submodule's gitdir has no `commondir`, so it lands under `.git/modules`.
 	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return undefined;
-	const worktreeContextFile = loadContextFileFromDir(worktreeRoot, new Set());
+	const worktreeContextFile = loadContextFileFromDir(worktreeRoot);
 	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
 }
 
@@ -342,20 +238,11 @@ export function loadProjectContextFiles(options: {
 
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
-	const warnedImports = new Set<string>();
 
-	// Check ~/.claude/ for CLAUDE.md (Claude Code compatibility)
-	const claudeDir = join(homedir(), ".claude");
-	const claudeContext = loadContextFileFromDir(claudeDir, warnedImports);
-	if (claudeContext) {
-		contextFiles.push(claudeContext);
-		seenPaths.add(canonicalizePath(claudeContext.path));
-	}
-
-	const globalContext = loadContextFileFromDir(resolvedAgentDir, warnedImports);
-	if (globalContext && !seenPaths.has(canonicalizePath(globalContext.path))) {
+	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+	if (globalContext) {
 		contextFiles.push(globalContext);
-		seenPaths.add(canonicalizePath(globalContext.path));
+		seenPaths.add(globalContext.path);
 	}
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
@@ -364,12 +251,12 @@ export function loadProjectContextFiles(options: {
 	let currentDir = resolvedCwd;
 
 	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir, warnedImports);
+		const contextFile = loadContextFileFromDir(currentDir);
 		const isShadowed =
 			shadowedContextFile !== undefined && canonicalizePath(contextFile?.path ?? "") === shadowedContextFile;
-		if (contextFile && !isShadowed && !seenPaths.has(canonicalizePath(contextFile.path))) {
+		if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
 			ancestorContextFiles.unshift(contextFile);
-			seenPaths.add(canonicalizePath(contextFile.path));
+			seenPaths.add(contextFile.path);
 		}
 
 		const parentDir = dirname(currentDir);

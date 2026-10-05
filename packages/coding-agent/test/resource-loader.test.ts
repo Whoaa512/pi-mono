@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -158,20 +158,26 @@ Prompt content.`,
 			expect(prompts.some((p) => p.name === "test-prompt")).toBe(true);
 		});
 
-		// Upstream #9354 rejects invalid YAML; the fork's resilient frontmatter parser loads it instead.
-		it("should load prompts with loose YAML frontmatter alongside valid siblings", async () => {
+		// Regression test for #9354.
+		it("should report invalid prompt frontmatter while loading valid siblings", async () => {
 			const promptsDir = join(agentDir, "prompts");
+			const invalidPromptPath = join(promptsDir, "invalid.md");
 			mkdirSync(promptsDir, { recursive: true });
-			writeFileSync(join(promptsDir, "loose.md"), "---\ndescription: Broken: unquoted colon\n---\nDo something.\n");
+			writeFileSync(invalidPromptPath, "---\ndescription: Broken: unquoted colon\n---\nDo something.\n");
 			writeFileSync(join(promptsDir, "valid.md"), "Valid prompt content.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
 			const { prompts, diagnostics } = loader.getPrompts();
-			expect(prompts.map((prompt) => prompt.name)).toEqual(["loose", "valid"]);
-			expect(prompts[0]?.description).toBe("Broken: unquoted colon");
-			expect(diagnostics).toEqual([]);
+			expect(prompts.map((prompt) => prompt.name)).toEqual(["valid"]);
+			expect(diagnostics).toEqual([
+				expect.objectContaining({
+					type: "warning",
+					path: invalidPromptPath,
+					message: expect.stringContaining("line 1, column 14"),
+				}),
+			]);
 		});
 
 		it("should prefer project resources over user on name collisions", async () => {
@@ -443,11 +449,7 @@ Content`,
 			const loader = new DefaultResourceLoader({ cwd: nestedCwd, agentDir });
 			await loader.reload();
 
-			// Fork injects the real ~/.claude/CLAUDE.md; drop it so the exact-list assertion holds.
-			const agentsFiles = loader
-				.getAgentsFiles()
-				.agentsFiles.filter((f) => !f.path.startsWith(join(homedir(), ".claude")));
-			expect(agentsFiles).toEqual([
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([
 				{ path: join(agentDir, "AGENTS.override.md"), content: "global override" },
 				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
 				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },
@@ -470,138 +472,6 @@ Content`,
 			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.md")));
 			expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining(join(cwd, "AGENTS.override.md")));
 			consoleError.mockRestore();
-		});
-
-		it("should load a context file once when two paths symlink to the same file", async () => {
-			const sharedContext = join(tempDir, "shared-context.md");
-			writeFileSync(sharedContext, "# Shared\n\nShared instructions.");
-			symlinkSync(sharedContext, join(agentDir, "AGENTS.md"), "file");
-			symlinkSync(sharedContext, join(cwd, "AGENTS.md"), "file");
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const { agentsFiles } = loader.getAgentsFiles();
-			const shared = agentsFiles.filter((f) => f.content.includes("Shared instructions."));
-			expect(shared).toHaveLength(1);
-			expect(shared[0].path).toBe(join(agentDir, "AGENTS.md"));
-		});
-
-		it("should expand @-imports in context files", async () => {
-			const sibling = join(cwd, "docs");
-			mkdirSync(sibling, { recursive: true });
-			writeFileSync(join(sibling, "nested.md"), "NESTED_CONTENT");
-			writeFileSync(join(sibling, "relative.md"), "RELATIVE_CONTENT @./nested.md");
-			const absoluteTarget = join(tempDir, "absolute.md");
-			writeFileSync(absoluteTarget, "ABSOLUTE_CONTENT");
-			writeFileSync(
-				join(cwd, "AGENTS.md"),
-				["@./docs/relative.md", `@${absoluteTarget}`, "@/definitely/missing/file.md"].join("\n"),
-			);
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-			expect(content).toContain("RELATIVE_CONTENT");
-			expect(content).toContain("NESTED_CONTENT");
-			expect(content).toContain("ABSOLUTE_CONTENT");
-			expect(content).toContain("@/definitely/missing/file.md");
-		});
-
-		it("should leave directory and package-name references literal without warning", async () => {
-			const warn = vi.spyOn(console, "error").mockImplementation(() => {});
-			try {
-				mkdirSync(join(cwd, "notes"), { recursive: true });
-				writeFileSync(
-					join(cwd, "AGENTS.md"),
-					[
-						`store notes in the @${join(cwd, "notes")} directory`,
-						"use tsgo provided by @typescript/native-preview",
-					].join("\n"),
-				);
-
-				const loader = new DefaultResourceLoader({ cwd, agentDir });
-				await loader.reload();
-
-				const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-				expect(content).toContain(`@${join(cwd, "notes")}`);
-				expect(content).toContain("@typescript/native-preview");
-				expect(warn).not.toHaveBeenCalled();
-			} finally {
-				warn.mockRestore();
-			}
-		});
-
-		it("should expand ~/ imports in context files", async () => {
-			const homeTarget = join(homedir(), `.pi-import-test-${Date.now()}.md`);
-			writeFileSync(homeTarget, "HOME_CONTENT");
-			try {
-				writeFileSync(join(cwd, "AGENTS.md"), `@~/${basename(homeTarget)}`);
-
-				const loader = new DefaultResourceLoader({ cwd, agentDir });
-				await loader.reload();
-
-				const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-				expect(content).toContain("HOME_CONTENT");
-			} finally {
-				rmSync(homeTarget, { force: true });
-			}
-		});
-
-		it("should stop expanding imports after 5 hops", async () => {
-			for (let i = 1; i <= 7; i++) {
-				writeFileSync(join(cwd, `hop${i}.md`), `HOP_${i} @./hop${i + 1}.md`);
-			}
-			writeFileSync(join(cwd, "AGENTS.md"), "@./hop1.md");
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-			for (let i = 1; i <= 5; i++) {
-				expect(content).toContain(`HOP_${i}`);
-			}
-			expect(content).not.toContain("HOP_6");
-			expect(content).toContain("@./hop6.md");
-		});
-
-		it("should not loop on cyclic imports", async () => {
-			writeFileSync(join(cwd, "a.md"), "A_CONTENT @./b.md");
-			writeFileSync(join(cwd, "b.md"), "B_CONTENT @./a.md");
-			writeFileSync(join(cwd, "AGENTS.md"), "@./a.md");
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-			expect(content).toContain("A_CONTENT");
-			expect(content).toContain("B_CONTENT");
-			expect(content).toContain("@./a.md");
-			expect(content?.match(/A_CONTENT/g)).toHaveLength(1);
-		});
-
-		it("should not expand imports inside code fences or inline code", async () => {
-			writeFileSync(join(cwd, "secret.md"), "SHOULD_NOT_APPEAR");
-			writeFileSync(
-				join(cwd, "AGENTS.md"),
-				[
-					"```bash",
-					"cat @./secret.md",
-					"```",
-					"inline `@./secret.md` reference",
-					"~~~",
-					"@./secret.md",
-					"~~~",
-				].join("\n"),
-			);
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const content = loader.getAgentsFiles().agentsFiles.find((f) => f.path === join(cwd, "AGENTS.md"))?.content;
-			expect(content).not.toContain("SHOULD_NOT_APPEAR");
-			expect(content?.match(/@\.\/secret\.md/g)).toHaveLength(3);
 		});
 
 		it("should skip context file discovery when noContextFiles is true", async () => {
@@ -1315,10 +1185,6 @@ export default function(pi: ExtensionAPI) {
 	});
 
 	describe("loadProjectContextFiles - nested worktree dedup", () => {
-		// The fork also injects ~/.claude/CLAUDE.md; exclude it so exact-list assertions stay hermetic.
-		const loadProjectFiles = (options: Parameters<typeof loadProjectContextFiles>[0]) =>
-			loadProjectContextFiles(options).filter((f) => !f.path.startsWith(join(homedir(), ".claude")));
-
 		// Builds a linked-worktree skeleton (no git binary needed): the main repo's
 		// `.git/worktrees/<name>/` holds `HEAD` plus a `commondir` pointing back at the
 		// main `.git`, and the worktree's working tree carries a `.git` *file* whose
@@ -1351,7 +1217,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["worktree instructions"]);
 		});
@@ -1360,7 +1226,7 @@ export default function(pi: ExtensionAPI) {
 			const { main, worktreeSrc } = setupNestedWorktree();
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 
-			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["main repo instructions"]);
 		});
@@ -1373,7 +1239,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "CLAUDE.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["main repo instructions", "worktree instructions"]);
 		});
@@ -1396,7 +1262,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(proj, "AGENTS.md"), "container instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectFiles({ cwd: worktree, agentDir });
+			const files = loadProjectContextFiles({ cwd: worktree, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["container instructions", "worktree instructions"]);
 		});
@@ -1407,7 +1273,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
 			writeFileSync(join(worktree, "AGENTS.md"), "worktree instructions");
 
-			const files = loadProjectFiles({ cwd: worktreeSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
 
 			// Only the main repo root's duplicate is dropped; the unrelated dir above it stays.
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "worktree instructions"]);
@@ -1426,7 +1292,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(sib, "AGENTS.md"), "sibling worktree instructions");
 			linkWorktree(main, sib, "sib");
 
-			const files = loadProjectFiles({ cwd: sibSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: sibSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "sibling worktree instructions"]);
 		});
@@ -1445,7 +1311,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(subGitDir, "HEAD"), "ref: refs/heads/main\n");
 			writeFileSync(join(sub, ".git"), `gitdir: ${subGitDir}\n`);
 
-			const files = loadProjectFiles({ cwd: subSrc, agentDir });
+			const files = loadProjectContextFiles({ cwd: subSrc, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["superproject instructions", "submodule instructions"]);
 		});
@@ -1461,7 +1327,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(repo, "AGENTS.md"), "repo instructions");
 			writeFileSync(join(leaf, "AGENTS.md"), "leaf instructions");
 
-			const files = loadProjectFiles({ cwd: leaf, agentDir });
+			const files = loadProjectContextFiles({ cwd: leaf, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["outer instructions", "repo instructions", "leaf instructions"]);
 		});
@@ -1474,7 +1340,7 @@ export default function(pi: ExtensionAPI) {
 			writeFileSync(join(repo, "AGENTS.md"), "repo instructions");
 			writeFileSync(join(src, "AGENTS.md"), "src instructions");
 
-			const files = loadProjectFiles({ cwd: src, agentDir });
+			const files = loadProjectContextFiles({ cwd: src, agentDir });
 
 			expect(files.map((f) => f.content)).toEqual(["repo instructions", "src instructions"]);
 		});
