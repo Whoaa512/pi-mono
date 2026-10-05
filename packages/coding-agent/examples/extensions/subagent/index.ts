@@ -19,31 +19,21 @@ import * as path from "node:path";
 import type { AgentToolResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import {
+	CONFIG_DIR_NAME,
+	type ExtensionAPI,
+	getAgentDir,
+	getMarkdownTheme,
+	withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
 
-const DEFAULT_MAX_PARALLEL_TASKS = 8;
-const DEFAULT_MAX_CONCURRENCY = 4;
+const MAX_PARALLEL_TASKS = 8;
+const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
-const PROCESS_EXIT_GRACE_MS = 30_000;
-const DEFAULT_MAX_AGENT_TIMEOUT_MS = 69 * 60 * 1000;
-const envTimeoutMs = Number(process.env.PI_SUBAGENT_TIMEOUT_MS);
-const MAX_AGENT_TIMEOUT_MS =
-	Number.isFinite(envTimeoutMs) && envTimeoutMs > 0 ? envTimeoutMs : DEFAULT_MAX_AGENT_TIMEOUT_MS;
-
-const MODEL_ALIASES: Record<string, string> = {
-	opus: "anthropic/claude-opus-4-6",
-	sonnet: "anthropic/claude-sonnet-4-5",
-	haiku: "anthropic/claude-haiku-4-5",
-};
-
-function resolveModelAlias(model: string | undefined): string | undefined {
-	if (!model) return model;
-	return MODEL_ALIASES[model.toLowerCase()] ?? model;
-}
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -290,7 +280,6 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
-	modelOverride?: string,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -308,14 +297,10 @@ async function runSingleAgent(
 		};
 	}
 
-	// Persist subagent sessions for accounting/mining, but in a sibling dir so
-	// they never appear in the interactive resume picker (which scans the default dir).
-	const subagentSessionDir = path.join(os.homedir(), ".pi", "agent", "subagent-sessions");
-	const args: string[] = ["--mode", "json", "-p", "--session-dir", subagentSessionDir];
-	const explicitModel = resolveModelAlias(modelOverride || agent.model);
-	const inheritsDispatchConfig = !explicitModel;
-	const effectiveModel = explicitModel ?? dispatchDefaults.model;
-	if (effectiveModel) args.push("--model", effectiveModel);
+	const args: string[] = ["--mode", "json", "-p", "--no-session"];
+	const inheritsDispatchConfig = !agent.model;
+	const model = agent.model ?? dispatchDefaults.model;
+	if (model) args.push("--model", model);
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
@@ -332,7 +317,7 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: effectiveModel,
+		model,
 		step,
 	};
 
@@ -392,10 +377,6 @@ async function runSingleAgent(
 						if (!currentResult.model && msg.model) currentResult.model = msg.model;
 						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
 						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
-
-						const isTerminal =
-							msg.stopReason === "stop" || msg.stopReason === "error" || msg.stopReason === "aborted";
-						if (isTerminal) startGraceTimer();
 					}
 					emitUpdate();
 				}
@@ -406,48 +387,6 @@ async function runSingleAgent(
 				}
 			};
 
-			let resolved = false;
-			let graceTimer: ReturnType<typeof setTimeout> | null = null;
-			let maxTimer: ReturnType<typeof setTimeout> | null = null;
-
-			const safeResolve = (code: number) => {
-				if (resolved) return;
-				resolved = true;
-				if (graceTimer) clearTimeout(graceTimer);
-				if (maxTimer) clearTimeout(maxTimer);
-				if (buffer.trim()) processLine(buffer);
-				resolve(code);
-			};
-
-			const killProc = () => {
-				try {
-					proc.kill("SIGTERM");
-				} catch {}
-				setTimeout(() => {
-					try {
-						if (!proc.killed) proc.kill("SIGKILL");
-					} catch {}
-				}, 5000);
-			};
-
-			const startGraceTimer = () => {
-				if (resolved || graceTimer) return;
-				graceTimer = setTimeout(() => {
-					if (!resolved) {
-						killProc();
-						safeResolve(0);
-					}
-				}, PROCESS_EXIT_GRACE_MS);
-			};
-
-			maxTimer = setTimeout(() => {
-				if (!resolved) {
-					killProc();
-					currentResult.errorMessage = "Subagent exceeded maximum timeout";
-					safeResolve(1);
-				}
-			}, MAX_AGENT_TIMEOUT_MS);
-
 			proc.stdout.on("data", (data) => {
 				buffer += data.toString();
 				const lines = buffer.split("\n");
@@ -455,37 +394,29 @@ async function runSingleAgent(
 				for (const line of lines) processLine(line);
 			});
 
-			proc.stdout.on("end", () => {
-				startGraceTimer();
-			});
-
-			proc.stdout.on("error", () => {});
-
 			proc.stderr.on("data", (data) => {
 				currentResult.stderr += data.toString();
 			});
 
-			proc.stderr.on("end", () => {
-				startGraceTimer();
-			});
-
-			proc.stderr.on("error", () => {});
-
 			proc.on("close", (code) => {
-				safeResolve(code ?? 0);
+				if (buffer.trim()) processLine(buffer);
+				resolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
-				safeResolve(1);
+				resolve(1);
 			});
 
 			if (signal) {
-				const abortHandler = () => {
+				const killProc = () => {
 					wasAborted = true;
-					killProc();
+					proc.kill("SIGTERM");
+					setTimeout(() => {
+						if (!proc.killed) proc.kill("SIGKILL");
+					}, 5000);
 				};
-				if (signal.aborted) abortHandler();
-				else signal.addEventListener("abort", abortHandler, { once: true });
+				if (signal.aborted) killProc();
+				else signal.addEventListener("abort", killProc, { once: true });
 			}
 		});
 
@@ -512,24 +443,16 @@ const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-	model: Type.Optional(Type.String({ description: "Override the agent's default model" })),
 });
 
 const ChainItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-	model: Type.Optional(Type.String({ description: "Override the agent's default model" })),
 });
 
-const AGENT_SCOPES = ["user", "project", "both"] as const;
-
-function isAgentScope(value: unknown): value is AgentScope {
-	return typeof value === "string" && AGENT_SCOPES.includes(value as AgentScope);
-}
-
-const AgentScopeSchema = StringEnum(AGENT_SCOPES, {
-	description: 'Which agent directories to use. Defaults to the subagent defaultAgentScope setting, or "user".',
+const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
+	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
 	default: "user",
 });
 
@@ -543,32 +466,22 @@ const SubagentParams = Type.Object({
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
-	model: Type.Optional(Type.String({ description: "Override the agent's default model (single mode)" })),
 });
 
 export default function (pi: ExtensionAPI) {
-	const settings = pi.getExtensionSettings("subagent");
-	const MAX_PARALLEL_TASKS =
-		typeof settings.maxParallelTasks === "number" ? settings.maxParallelTasks : DEFAULT_MAX_PARALLEL_TASKS;
-	const MAX_CONCURRENCY =
-		typeof settings.maxConcurrency === "number" ? settings.maxConcurrency : DEFAULT_MAX_CONCURRENCY;
-	const DEFAULT_AGENT_SCOPE: AgentScope = isAgentScope(settings.defaultAgentScope)
-		? settings.defaultAgentScope
-		: "user";
-
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			'Default agent scope comes from extension-settings.subagent.defaultAgentScope, falling back to "user".',
-			'To enable project-local agents in .pi/agents or .claude/agents, set agentScope: "both" (or "project").',
+			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
+			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const agentScope: AgentScope = params.agentScope ?? DEFAULT_AGENT_SCOPE;
+			const agentScope: AgentScope = params.agentScope ?? "user";
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 				thinkingLevel: ctx.thinkingLevel,
@@ -668,7 +581,6 @@ export default function (pi: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
-						step.model,
 					);
 					results.push(result);
 
@@ -748,7 +660,6 @@ export default function (pi: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
-						t.model,
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -786,7 +697,6 @@ export default function (pi: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
-					params.model,
 				);
 				const isError = isFailedResult(result);
 				if (isError) {
@@ -811,7 +721,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? DEFAULT_AGENT_SCOPE;
+			const scope: AgentScope = args.agentScope ?? "user";
 			if (args.chain && args.chain.length > 0) {
 				let text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +

@@ -52,39 +52,11 @@ for f in packages/coding-agent/examples/extensions/subagent/prompts/*.md; do
 done
 ```
 
-## Configuration
-
-Configure concurrency limits in `~/.pi/agent/settings.json` under `"extension-settings"`:
-
-```json
-{
-  "extension-settings": {
-    "subagent": {
-      "maxParallelTasks": 12,
-      "maxConcurrency": 6,
-      "defaultAgentScope": "both"
-    }
-  }
-}
-```
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `maxParallelTasks` | 8 | Maximum tasks in a single parallel invocation |
-| `maxConcurrency` | 4 | Maximum agents running simultaneously |
-| `defaultAgentScope` | `"user"` | Default agent scope when `agentScope` is omitted. Use `"both"` to include project-local agents by default. |
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PI_SUBAGENT_TIMEOUT_MS` | `4140000` (69 min) | Hard cap per subagent run. On expiry the child process is killed and the partial transcript is returned with the error `Subagent exceeded maximum timeout`. |
-
 ## Security Model
 
 This tool executes a separate `pi` subprocess with a delegated system prompt and tool/model configuration.
 
-**Project-local agents** (`.pi/agents/*.md` or `.claude/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
+**Project-local agents** (`.pi/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
 
 **Default behavior:** Only loads **user-level agents** from `~/.pi/agent/agents`.
 
@@ -170,9 +142,8 @@ When `model` is omitted, the subagent inherits the dispatching session's active 
 **Locations:**
 - `~/.pi/agent/agents/*.md` - User-level (always loaded)
 - `.pi/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`)
-- `.claude/agents/*.md` - Claude Code-compatible project agents (only with `agentScope: "project"` or `"both"`)
 
-Project agents override user agents with the same name when `agentScope: "both"`. `.pi/agents` overrides `.claude/agents` when both define the same agent name in the same project.
+Project agents override user agents with the same name when `agentScope: "both"`.
 
 ## Sample Agents
 
@@ -203,4 +174,4 @@ Project agents override user agents with the same name when `agentScope: "both"`
 - Output truncated to last 10 items in collapsed view (expand to see all)
 - Parallel model-visible output is capped at 50 KB per task; full results remain in tool details
 - Agents discovered fresh on each invocation (allows editing mid-session)
-- Parallel mode limited to 8 tasks, 4 concurrent (configurable via settings)
+- Parallel mode limited to 8 tasks, 4 concurrent

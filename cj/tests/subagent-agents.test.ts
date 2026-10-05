@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverAgents } from "../examples/extensions/subagent/agents.ts";
+import { discoverAgents } from "../../../dotfiles/ai/pi/agent/extensions/subagent/agents.ts";
 
 const tempDirs: string[] = [];
 
