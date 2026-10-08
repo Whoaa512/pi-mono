@@ -77,7 +77,7 @@ Run the validation order from `AGENTS.local.md`. Currently:
 1. `npm install` (lockfile / deps settle)
 2. `npm run check` — must exit 0 (fix all errors/warnings/infos)
 3. `npm run clean && npm run build` — required; stale paths in `dist/` break tests
-4. cj tests: `npx vitest --run cj/tests/`
+4. cj tests: `npx vitest --run -c cj/tests/vitest.config.ts cj/tests/`
 5. Targeted package tests listed in the runbook (openai-completions cache, prompt-history, settings-manager, etc.)
 6. Live Anthropic cache test if `openai-completions.ts` changed — invocation + pass criteria are in `AGENTS.local.md`.
 
@@ -95,8 +95,8 @@ The most dangerous regressions leave **no conflict marker**: when upstream edits
    ```
    Prioritize the files our feature patches touch (`git log --oneline upstream/main..cj-main --no-merges` → `--stat`).
 2. **Cross-check upstream's Breaking Changes / Removed** (from step 1) against fork + extension reliance. Recurring offenders: tool `execute` signature order, `@sinclair/typebox` → `typebox` (the `/compiler` shim was dropped — import `Type` from `@earendil-works/pi-ai` or `typebox`), `--no-context-files` gating, ext `ctx` shape.
-3. **Known recurring silent flip:** `examples/extensions/question.ts` + `questionnaire.ts` guard. Upstream keeps setting `if (ctx.mode !== "tui")`; we require `if (!ctx.hasUI)` (breaks Supacode/RPC otherwise). Grep both files and revert. See `AGENTS.local.md`.
-4. **External extension dirs are not in this repo** (CJ's dotfiles exts, `~/.pi/agent/extensions/`) so scope/import migrations (`@mariozechner` → `@earendil-works`, typebox) never show as conflicts. The `cj/tests/` suite imports and exercises several of them — `npx vitest --run cj/tests/` is the canary. If an ext import broke, fix it in its source dir (dotfiles repo, committed separately) and rerun.
+3. **Take upstream wholesale where the fork no longer patches:** `examples/extensions/`, `utils/frontmatter.ts`, `packages/tui` (except the resize fix in `tui-main-screen.ts`), `package.json`, lockfile. The fork's question, questionnaire, subagent, `~/.claude` context loading and `@` autocomplete live in the dotfiles extensions; port upstream improvements there by choice. `git diff --stat upstream/main -- packages/coding-agent/examples packages/tui package.json package-lock.json` should show only `tui-main-screen.ts`.
+4. **External extension dirs are not in this repo** (CJ's dotfiles exts, `~/.pi/agent/extensions/`) so scope/import migrations (`@mariozechner` → `@earendil-works`, typebox) never show as conflicts. The `cj/tests/` suite imports and exercises several of them — `npx vitest --run -c cj/tests/vitest.config.ts cj/tests/` is the canary. If an ext import broke, fix it in its source dir (dotfiles repo, committed separately) and rerun.
 
 ## 7. Rebuild the user's binary
 
