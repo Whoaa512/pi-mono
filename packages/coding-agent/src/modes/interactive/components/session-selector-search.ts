@@ -1,17 +1,9 @@
 import { fuzzyMatch } from "@earendil-works/pi-tui";
-import type { SessionInfo, SessionMessagePreview } from "../../../core/session-manager.ts";
+import type { SessionInfo } from "../../../core/session-manager.ts";
 
 export type SortMode = "threaded" | "recent" | "relevance";
 
 export type NameFilter = "all" | "named";
-
-export type RoleFilter = "both" | "user" | "agent";
-
-export interface SessionMatch {
-	session: SessionInfo;
-	/** The best-matching message for the current query, when per-message matching applied. */
-	bestMessage?: SessionMessagePreview;
-}
 
 export interface ParsedSearchQuery {
 	mode: "tokens" | "regex";
@@ -25,27 +17,89 @@ export interface MatchResult {
 	matches: boolean;
 	/** Lower is better; only meaningful when matches === true */
 	score: number;
-	/** The best-matching message, when the match came from a message body. */
-	bestMessage?: SessionMessagePreview;
 }
 
 function normalizeWhitespaceLower(text: string): string {
 	return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function getSessionSearchText(session: SessionInfo): string {
-	return `${session.id} ${session.name ?? ""} ${session.allMessagesText} ${session.cwd}`;
+/**
+ * Match tiers, best first. Each token is scored by the best field it matches; tiers dominate
+ * fuzzy scores so an exact hit anywhere beats a scattered subsequence in a short field.
+ */
+const TIER_NAME = 0; // query text appears in the session name
+const TIER_TEXT = 1; // query text appears in the session id, messages, or cwd
+const TIER_FUZZY = 2; // query characters appear scattered in the session name or cwd
+const TIER_WEIGHT = 1_000_000;
+
+interface LowercaseCache {
+	source: string;
+	lower: string;
+	normalized?: string;
 }
 
-/** Metadata text (id, name, cwd) always participates in matching, regardless of role filter. */
-function getSessionMetaText(session: SessionInfo): string {
-	return `${session.id} ${session.name ?? ""} ${session.cwd}`;
+/**
+ * Lowercased message text per session. allMessagesText holds every user/assistant message and
+ * can be megabytes, so lowercase it once instead of on every keystroke.
+ */
+const messageTextCache = new WeakMap<SessionInfo, LowercaseCache>();
+
+function getMessageText(session: SessionInfo): LowercaseCache {
+	let cached = messageTextCache.get(session);
+	if (!cached || cached.source !== session.allMessagesText) {
+		cached = { source: session.allMessagesText, lower: session.allMessagesText.toLowerCase() };
+		messageTextCache.set(session, cached);
+	}
+	return cached;
 }
 
-function messageInScope(message: SessionMessagePreview, roleFilter: RoleFilter): boolean {
-	if (roleFilter === "both") return true;
-	if (roleFilter === "user") return message.role === "user";
-	return message.role === "assistant";
+function getNormalizedMessageText(session: SessionInfo): string {
+	const cached = getMessageText(session);
+	cached.normalized ??= cached.lower.replace(/\s+/g, " ").trim();
+	return cached.normalized;
+}
+
+function tierScore(tier: number, score = 0): number {
+	return tier * TIER_WEIGHT + score;
+}
+
+/** Exact (case-insensitive) text match. Messages and ids are only matched exactly: scattered matches in them are noise. */
+function matchLiteralToken(session: SessionInfo, value: string): number | undefined {
+	const name = session.name?.toLowerCase() ?? "";
+	if (name.includes(value)) return tierScore(TIER_NAME, fuzzyMatch(value, name).score);
+	if (session.id.toLowerCase().includes(value)) return tierScore(TIER_TEXT);
+	if (getMessageText(session).lower.includes(value)) return tierScore(TIER_TEXT);
+	if (session.cwd.toLowerCase().includes(value)) return tierScore(TIER_TEXT);
+	return undefined;
+}
+
+function matchFuzzyToken(session: SessionInfo, value: string): number | undefined {
+	const literal = matchLiteralToken(session, value.toLowerCase());
+	if (literal !== undefined) return literal;
+
+	let best: number | undefined;
+	for (const field of [session.name ?? "", session.cwd]) {
+		const m = fuzzyMatch(value, field);
+		if (m.matches && (best === undefined || m.score < best)) best = m.score;
+	}
+	return best === undefined ? undefined : tierScore(TIER_FUZZY, best);
+}
+
+function matchPhraseToken(session: SessionInfo, phrase: string): number | undefined {
+	const name = normalizeWhitespaceLower(session.name ?? "");
+	if (name.includes(phrase)) return tierScore(TIER_NAME, fuzzyMatch(phrase, name).score);
+	if (session.id.toLowerCase().includes(phrase)) return tierScore(TIER_TEXT);
+	if (getNormalizedMessageText(session).includes(phrase)) return tierScore(TIER_TEXT);
+	if (normalizeWhitespaceLower(session.cwd).includes(phrase)) return tierScore(TIER_TEXT);
+	return undefined;
+}
+
+function matchRegex(session: SessionInfo, regex: RegExp): number | undefined {
+	if (session.name && regex.test(session.name)) return tierScore(TIER_NAME);
+	if (regex.test(session.id) || regex.test(session.allMessagesText) || regex.test(session.cwd)) {
+		return tierScore(TIER_TEXT);
+	}
+	return undefined;
 }
 
 export function hasSessionName(session: SessionInfo): boolean {
@@ -135,108 +189,34 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
 }
 
 /**
- * Match a parsed query against a single text. Returns null when it does not match.
- *
- * tokenStyle controls how plain (unquoted) tokens match:
- * - "fuzzy": char-subsequence match (good for short texts like ids/names/paths)
- * - "substring": case-insensitive substring (good for long prose; char-subsequence
- *   over message bodies matches nearly everything and destroys precision)
+ * Each field is matched separately, so a token never matches across field boundaries.
+ * Different tokens may match different fields.
  */
-function matchText(text: string, parsed: ParsedSearchQuery, tokenStyle: "fuzzy" | "substring"): number | null {
+export function matchSession(session: SessionInfo, parsed: ParsedSearchQuery): MatchResult {
 	if (parsed.mode === "regex") {
-		if (!parsed.regex) return null;
-		const idx = text.search(parsed.regex);
-		if (idx < 0) return null;
-		return idx * 0.1;
+		if (!parsed.regex) {
+			return { matches: false, score: 0 };
+		}
+		const score = matchRegex(session, parsed.regex);
+		return score === undefined ? { matches: false, score: 0 } : { matches: true, score };
 	}
 
 	let totalScore = 0;
-	let normalizedText: string | null = null;
-	let lowerText: string | null = null;
 
 	for (const token of parsed.tokens) {
+		let score: number | undefined;
 		if (token.kind === "phrase") {
-			if (normalizedText === null) {
-				normalizedText = normalizeWhitespaceLower(text);
-			}
 			const phrase = normalizeWhitespaceLower(token.value);
 			if (!phrase) continue;
-			const idx = normalizedText.indexOf(phrase);
-			if (idx < 0) return null;
-			totalScore += idx * 0.1;
-			continue;
+			score = matchPhraseToken(session, phrase);
+		} else {
+			score = matchFuzzyToken(session, token.value);
 		}
-
-		if (tokenStyle === "substring") {
-			if (lowerText === null) {
-				lowerText = text.toLowerCase();
-			}
-			const idx = lowerText.indexOf(token.value.toLowerCase());
-			if (idx < 0) return null;
-			totalScore += idx * 0.1;
-			continue;
-		}
-
-		const m = fuzzyMatch(token.value, text);
-		if (!m.matches) return null;
-		totalScore += m.score;
+		if (score === undefined) return { matches: false, score: 0 };
+		totalScore += score;
 	}
 
-	return totalScore;
-}
-
-/**
- * Match a session against a parsed query.
- *
- * When per-message previews are available, the full query must match within a
- * single message (or within the session metadata: id/name/cwd). This is
- * stricter than matching against the flattened text of all messages -- it
- * prevents multi-token queries from matching across unrelated messages -- and
- * lets us report which message matched best.
- *
- * Sessions without previews (older callers/tests) fall back to matching the
- * flattened all-messages text.
- */
-export function matchSession(
-	session: SessionInfo,
-	parsed: ParsedSearchQuery,
-	roleFilter: RoleFilter = "both",
-): MatchResult {
-	if (parsed.mode === "regex" && !parsed.regex) {
-		return { matches: false, score: 0 };
-	}
-
-	if (parsed.mode === "tokens" && parsed.tokens.length === 0) {
-		return { matches: true, score: 0 };
-	}
-
-	const previews = session.messages;
-	if (!previews || previews.length === 0) {
-		const score = matchText(getSessionSearchText(session), parsed, "fuzzy");
-		if (score === null) return { matches: false, score: 0 };
-		return { matches: true, score };
-	}
-
-	let best: number | null = null;
-	let bestMessage: SessionMessagePreview | undefined;
-
-	for (const message of previews) {
-		if (!messageInScope(message, roleFilter)) continue;
-		const score = matchText(message.text, parsed, "substring");
-		if (score !== null && (best === null || score < best)) {
-			best = score;
-			bestMessage = message;
-		}
-	}
-
-	const metaScore = matchText(getSessionMetaText(session), parsed, "fuzzy");
-	if (metaScore !== null && (best === null || metaScore < best)) {
-		best = metaScore;
-		bestMessage = undefined;
-	}
-
-	if (best === null) return { matches: false, score: 0 };
-	return { matches: true, score: best, bestMessage };
+	return { matches: true, score: totalScore };
 }
 
 export function filterAndSortSessions(
@@ -244,38 +224,37 @@ export function filterAndSortSessions(
 	query: string,
 	sortMode: SortMode,
 	nameFilter: NameFilter = "all",
-	roleFilter: RoleFilter = "both",
-): SessionMatch[] {
+): SessionInfo[] {
 	const nameFiltered =
 		nameFilter === "all" ? sessions : sessions.filter((session) => matchesNameFilter(session, nameFilter));
 	const trimmed = query.trim();
-	if (!trimmed) return nameFiltered.map((session) => ({ session }));
+	if (!trimmed) return nameFiltered;
 
 	const parsed = parseSearchQuery(query);
 	if (parsed.error) return [];
 
 	// Recent mode: filter only, keep incoming order.
 	if (sortMode === "recent") {
-		const filtered: SessionMatch[] = [];
+		const filtered: SessionInfo[] = [];
 		for (const s of nameFiltered) {
-			const res = matchSession(s, parsed, roleFilter);
-			if (res.matches) filtered.push({ session: s, bestMessage: res.bestMessage });
+			const res = matchSession(s, parsed);
+			if (res.matches) filtered.push(s);
 		}
 		return filtered;
 	}
 
 	// Relevance mode: sort by score, tie-break by modified desc.
-	const scored: { match: SessionMatch; score: number }[] = [];
+	const scored: { session: SessionInfo; score: number }[] = [];
 	for (const s of nameFiltered) {
-		const res = matchSession(s, parsed, roleFilter);
+		const res = matchSession(s, parsed);
 		if (!res.matches) continue;
-		scored.push({ match: { session: s, bestMessage: res.bestMessage }, score: res.score });
+		scored.push({ session: s, score: res.score });
 	}
 
 	scored.sort((a, b) => {
 		if (a.score !== b.score) return a.score - b.score;
-		return b.match.session.modified.getTime() - a.match.session.modified.getTime();
+		return b.session.modified.getTime() - a.session.modified.getTime();
 	});
 
-	return scored.map((r) => r.match);
+	return scored.map((r) => r.session);
 }

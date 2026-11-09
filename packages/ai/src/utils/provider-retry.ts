@@ -6,6 +6,8 @@ interface ProviderRetryOptions {
 	signal?: AbortSignal;
 	/** Awaited right before each backoff sleep. Callback failures are swallowed. */
 	onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; error: Error }) => void | Promise<void>;
+	/** HTTP statuses that fail at once although the default policy would retry them. */
+	noRetryStatuses?: readonly number[];
 }
 
 interface ProviderError extends Error {
@@ -118,6 +120,7 @@ export async function retryProviderRequest<T>(
 		} catch (error) {
 			if (options.signal?.aborted) throw createAbortError();
 			if (retriesRemaining <= 0 || !isProviderError(error) || !isRetryableProviderError(error)) throw error;
+			if (error.status !== undefined && options.noRetryStatuses?.includes(error.status)) throw error;
 
 			const retryIndex = maxRetries - retriesRemaining;
 			retriesRemaining--;

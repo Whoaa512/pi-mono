@@ -46,7 +46,6 @@ function makeSession(overrides: Partial<SessionInfo> & { id: string }): SessionI
 		messageCount: overrides.messageCount ?? 1,
 		firstMessage: overrides.firstMessage ?? "hello",
 		allMessagesText: overrides.allMessagesText ?? "hello",
-		messages: overrides.messages ?? [{ role: "user", text: overrides.allMessagesText ?? "hello" }],
 	};
 }
 

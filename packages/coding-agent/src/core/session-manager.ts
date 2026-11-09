@@ -30,7 +30,7 @@ import { basename, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
-import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { normalizePath, pathsEqual, resolvePath } from "../utils/paths.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -240,13 +240,6 @@ export interface SessionInfo {
 	messageCount: number;
 	firstMessage: string;
 	allMessagesText: string;
-	/** Per-message previews (user/assistant text, capped) for role-scoped search and relevant-message display. */
-	messages: SessionMessagePreview[];
-}
-
-export interface SessionMessagePreview {
-	role: "user" | "assistant";
-	text: string;
 }
 
 export type ReadonlySessionManager = Pick<
@@ -523,7 +516,8 @@ export function buildContextEntries(
  * If leafId is provided, walks from that entry to root.
  * Handles compaction and branch summaries along the path.
  */
-function projectContextEntry(entry: SessionEntry, edit: ContextEditEntry | undefined): AgentMessage[] {
+/** Project one entry into model-visible messages, applying its latest context edit if any. */
+export function projectContextEntry(entry: SessionEntry, edit: ContextEditEntry | undefined): AgentMessage[] {
 	const messages = sessionEntryToContextMessages(entry);
 	if (!edit) return messages;
 	const replacement = edit.replacement;
@@ -749,7 +743,7 @@ function getSessionHeaderCwd(header: SessionHeader): string | undefined {
 }
 
 function sessionCwdMatches(cwd: string | undefined, resolvedCwd: string): boolean {
-	return cwd !== undefined && cwd !== "" && resolvePath(cwd) === resolvedCwd;
+	return cwd !== undefined && cwd !== "" && pathsEqual(resolvePath(cwd), resolvedCwd);
 }
 
 /** Exported for testing */
@@ -803,8 +797,6 @@ function getMessageActivityTime(entry: SessionMessageEntry): number | undefined 
 	return Number.isNaN(t) ? undefined : t;
 }
 
-const MESSAGE_PREVIEW_MAX_CHARS = 2000;
-
 async function buildSessionInfo(
 	filePath: string,
 	signal?: AbortSignal,
@@ -816,7 +808,6 @@ async function buildSessionInfo(
 		let messageCount = 0;
 		let firstMessage = "";
 		const allMessages: string[] = [];
-		const messagePreviews: SessionMessagePreview[] = [];
 		let name: string | undefined;
 		let lastActivityTime: number | undefined;
 
@@ -856,7 +847,6 @@ async function buildSessionInfo(
 			if (!textContent) continue;
 
 			allMessages.push(textContent);
-			messagePreviews.push({ role: message.role, text: textContent.slice(0, MESSAGE_PREVIEW_MAX_CHARS) });
 			if (!firstMessage && message.role === "user") {
 				firstMessage = textContent;
 			}
@@ -885,7 +875,6 @@ async function buildSessionInfo(
 			messageCount,
 			firstMessage: firstMessage || "(no messages)",
 			allMessagesText: allMessages.join(" "),
-			messages: messagePreviews,
 		};
 	} catch {
 		signal?.throwIfAborted();
@@ -1158,7 +1147,7 @@ export class SessionManager {
 	}
 
 	usesDefaultSessionDir(): boolean {
-		return this.sessionDir === getDefaultSessionDirPath(this.cwd);
+		return pathsEqual(this.sessionDir, getDefaultSessionDirPath(this.cwd));
 	}
 
 	getSessionId(): string {
@@ -1201,10 +1190,20 @@ export class SessionManager {
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
+		const previousLeafId = this.leafId;
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
-		this._persist(entry);
+		try {
+			this._persist(entry);
+		} catch (error) {
+			// Keep memory in line with the file: an entry that was not written must not become the
+			// parent of later entries, or the file would hold entries pointing to a missing parent.
+			this.fileEntries.pop();
+			this.byId.delete(entry.id);
+			this.leafId = previousLeafId;
+			throw error;
+		}
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.
@@ -1804,7 +1803,7 @@ export class SessionManager {
 	 */
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const filterCwd = sessionDir !== undefined && !pathsEqual(dir, getDefaultSessionDirPath(cwd));
 		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined);
 		if (mostRecent) {
 			return new SessionManager(cwd, dir, mostRecent, true);
@@ -1865,13 +1864,18 @@ export class SessionManager {
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
 		};
-		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
-
-		// Copy all non-header entries from source
-		for (const entry of sourceEntries) {
-			if (entry.type !== "session") {
-				appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
+		// Write the header and all non-header entries through one fd. Reopening the file per entry
+		// is slow where open/close is expensive (e.g. filesystem security monitors).
+		const fd = openSync(newSessionFile, "wx");
+		try {
+			writeFileSync(fd, `${JSON.stringify(newHeader)}\n`);
+			for (const entry of sourceEntries) {
+				if (entry.type !== "session") {
+					writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+				}
 			}
+		} finally {
+			closeSync(fd);
 		}
 
 		return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
@@ -1885,7 +1889,7 @@ export class SessionManager {
 	 */
 	static findById(cwd: string, id: string, sessionDir?: string): string | undefined {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const filterCwd = sessionDir !== undefined && !pathsEqual(dir, getDefaultSessionDirPath(cwd));
 		const resolvedCwd = resolvePath(cwd);
 
 		try {
@@ -1916,7 +1920,7 @@ export class SessionManager {
 		signal?: AbortSignal,
 	): Promise<SessionInfo[]> {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const filterCwd = sessionDir !== undefined && !pathsEqual(dir, getDefaultSessionDirPath(cwd));
 		const resolvedCwd = resolvePath(cwd);
 		const includeSession = (session: SessionInfo) => !filterCwd || sessionCwdMatches(session.cwd, resolvedCwd);
 		const progress: SessionListProgress | undefined = onProgress

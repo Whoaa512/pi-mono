@@ -28,8 +28,10 @@ import { markTiming } from "../timings.ts";
 import type { VirtualModelDefinition } from "../virtual-models.ts";
 import type {
 	AgentBeforeSettleEvent,
+	BeforeAgentStartCustomEvent,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
+	BeforeAgentStartUserEvent,
 	BeforeProviderHeadersEvent,
 	BeforeProviderRequestEvent,
 	BoundaryContextPreview,
@@ -83,6 +85,7 @@ import type {
 	SessionShutdownEvent,
 	ToolCallEvent,
 	ToolCallEventResult,
+	ToolRenderers,
 	ToolResultEvent,
 	ToolResultEventResult,
 	TurnEndEvent,
@@ -162,6 +165,11 @@ function isUserBashEventResult(value: unknown): value is UserBashEventResult {
 		(resultRecord.fullOutputPath === undefined || typeof resultRecord.fullOutputPath === "string")
 	);
 }
+
+/** The message that starts a run: the before_agent_start event without its prompt fields. */
+export type BeforeAgentStartTrigger =
+	| Pick<BeforeAgentStartUserEvent, "messageType" | "prompt" | "images">
+	| Pick<BeforeAgentStartCustomEvent, "messageType" | "message">;
 
 /** Combined result from all before_agent_start handlers. */
 interface BeforeAgentStartCombinedResult {
@@ -783,8 +791,23 @@ export class ExtensionRunner {
 		return undefined;
 	}
 
+	/** Markdown transformers in extension load order; each one leaves Markdown of unregistered surfaces unchanged. */
 	getMarkdownTransformers(): MarkdownTransformer[] {
-		return this.extensions.flatMap((ext) => (ext.markdownTransformer ? [ext.markdownTransformer] : []));
+		return this.extensions.flatMap((ext): MarkdownTransformer[] => {
+			if (!ext.markdownTransformer) return [];
+			const { transformer, messageTypes } = ext.markdownTransformer;
+			return [
+				(markdown, context) => (messageTypes.has(context.messageType) ? transformer(markdown, context) : markdown),
+			];
+		});
+	}
+
+	/** Renderers of calls to `toolName`: extension resolvers in load order, then `base`. */
+	resolveToolRenderers(toolName: string, base: () => ToolRenderers | undefined): ToolRenderers | undefined {
+		const resolvers = this.extensions.flatMap((ext) => ext.toolRenderers ?? []);
+		const resolve = (index: number): ToolRenderers | undefined =>
+			index < resolvers.length ? resolvers[index](toolName, () => resolve(index + 1)) : base();
+		return resolve(0);
 	}
 
 	getEntryRenderer(customType: string): EntryRenderer | undefined {
@@ -1414,8 +1437,7 @@ export class ExtensionRunner {
 	}
 
 	async emitBeforeAgentStart(
-		prompt: string,
-		images: ImageContent[] | undefined,
+		trigger: BeforeAgentStartTrigger,
 		systemPromptOptions: BuildSystemPromptOptions,
 	): Promise<BeforeAgentStartCombinedResult> {
 		const currentOptions = normalizeBuildSystemPromptOptions(systemPromptOptions);
@@ -1434,9 +1456,8 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: BeforeAgentStartEvent = {
+						...trigger,
 						type: "before_agent_start",
-						prompt,
-						images,
 						get systemPrompt() {
 							return renderCurrentSystemPrompt();
 						},

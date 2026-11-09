@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import * as os from "node:os";
 import {
 	type Component,
 	Container,
@@ -14,29 +13,14 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
-import type { SessionInfo, SessionListProgress, SessionMessagePreview } from "../../../core/session-manager.ts";
-import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
+import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.ts";
+import { canonicalizePath, getPathComparisonKey, shortenHomePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
-import {
-	filterAndSortSessions,
-	hasSessionName,
-	type NameFilter,
-	type RoleFilter,
-	type SortMode,
-} from "./session-selector-search.ts";
+import { filterAndSortSessions, hasSessionName, type NameFilter, type SortMode } from "./session-selector-search.ts";
 
 type SessionScope = "current" | "all";
-
-function shortenPath(path: string): string {
-	const home = os.homedir();
-	if (!path) return path;
-	if (path.startsWith(home)) {
-		return `~${path.slice(home.length)}`;
-	}
-	return path;
-}
 
 function formatSessionDate(date: Date): string {
 	const now = new Date();
@@ -54,16 +38,15 @@ function formatSessionDate(date: Date): string {
 	return `${Math.floor(diffDays / 365)}y`;
 }
 
-function canonicalizePath(path: string | undefined): string | undefined {
-	if (!path) return path;
-	return _canonicalizePath(path);
+/** Comparison key for a session file path; follows symlinks and ignores case on Windows. */
+function getSessionPathKey(path: string): string {
+	return getPathComparisonKey(canonicalizePath(path));
 }
 
 class SessionSelectorHeader implements Component {
 	private scope: SessionScope;
 	private sortMode: SortMode;
 	private nameFilter: NameFilter;
-	private roleFilter: RoleFilter = "both";
 	private requestRender: () => void;
 	private loading = false;
 	private loadProgress: { loaded: number; total: number } | null = null;
@@ -90,10 +73,6 @@ class SessionSelectorHeader implements Component {
 
 	setNameFilter(nameFilter: NameFilter): void {
 		this.nameFilter = nameFilter;
-	}
-
-	setRoleFilter(roleFilter: RoleFilter): void {
-		this.roleFilter = roleFilter;
 	}
 
 	setLoading(loading: boolean): void {
@@ -148,9 +127,6 @@ class SessionSelectorHeader implements Component {
 		const nameLabel = this.nameFilter === "all" ? "All" : "Named";
 		const nameText = theme.fg("muted", "Name: ") + theme.fg("accent", nameLabel);
 
-		const roleLabel = this.roleFilter === "both" ? "Both" : this.roleFilter === "user" ? "User" : "Agent";
-		const roleText = theme.fg("muted", "Role: ") + theme.fg("accent", roleLabel);
-
 		let scopeText: string;
 		if (this.loading) {
 			const progressText = this.loadProgress ? `${this.loadProgress.loaded}/${this.loadProgress.total}` : "...";
@@ -161,7 +137,7 @@ class SessionSelectorHeader implements Component {
 			scopeText = `${theme.fg("muted", "○ Current Folder | ")}${theme.fg("accent", "◉ All")}`;
 		}
 
-		const rightText = truncateToWidth(`${scopeText}  ${nameText}  ${roleText}  ${sortText}`, width, "");
+		const rightText = truncateToWidth(`${scopeText}  ${nameText}  ${sortText}`, width, "");
 		const availableLeft = Math.max(0, width - visibleWidth(rightText) - 1);
 		const left = truncateToWidth(leftText, availableLeft, "");
 		const spacing = Math.max(0, width - visibleWidth(left) - visibleWidth(rightText));
@@ -185,7 +161,6 @@ class SessionSelectorHeader implements Component {
 			const hint2Parts = [
 				keyHint("app.session.toggleSort", "sort"),
 				keyHint("app.session.toggleNamedFilter", "named"),
-				keyHint("app.session.toggleRoleFilter", "role"),
 				keyHint("app.session.delete", "delete"),
 				keyHint("app.session.togglePath", `path ${pathState}`),
 			];
@@ -215,8 +190,6 @@ interface FlatSessionNode {
 	isLast: boolean;
 	/** For each ancestor level, whether there are more siblings after it */
 	ancestorContinues: boolean[];
-	/** Best-matching message for the current search query, when available. */
-	bestMessage?: SessionMessagePreview;
 }
 
 /**
@@ -227,16 +200,16 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 	const byPath = new Map<string, SessionTreeNode>();
 
 	for (const session of sessions) {
-		const sessionPath = canonicalizePath(session.path) ?? session.path;
+		const sessionPath = getSessionPathKey(session.path);
 		byPath.set(sessionPath, { session, children: [], latestActivity: session.modified.getTime() });
 	}
 
 	const roots: SessionTreeNode[] = [];
 
 	for (const session of sessions) {
-		const sessionPath = canonicalizePath(session.path) ?? session.path;
+		const sessionPath = getSessionPathKey(session.path);
 		const node = byPath.get(sessionPath)!;
-		const parentPath = canonicalizePath(session.parentSessionPath);
+		const parentPath = session.parentSessionPath ? getSessionPathKey(session.parentSessionPath) : undefined;
 
 		if (parentPath && byPath.has(parentPath)) {
 			byPath.get(parentPath)!.children.push(node);
@@ -310,18 +283,16 @@ class SessionList implements Component, Focusable {
 	private showCwd = false;
 	private sortMode: SortMode = "threaded";
 	private nameFilter: NameFilter = "all";
-	private roleFilter: RoleFilter = "both";
 	private keybindings: KeybindingsManager;
 	private showPath = false;
 	private confirmingDeletePath: string | null = null;
-	private currentSessionCanonicalPath?: string;
+	private currentSessionPathKey?: string;
 	public onSelect?: (sessionPath: string) => void;
 	public onCancel?: () => void;
 	public onExit: () => void = () => {};
 	public onToggleScope?: () => void;
 	public onToggleSort?: () => void;
 	public onToggleNameFilter?: () => void;
-	public onToggleRoleFilter?: () => void;
 	public onTogglePath?: (showPath: boolean) => void;
 	public onDeleteConfirmationChange?: (path: string | null) => void;
 	public onDeleteSession?: (sessionPath: string) => Promise<void>;
@@ -354,7 +325,7 @@ class SessionList implements Component, Focusable {
 		this.sortMode = sortMode;
 		this.nameFilter = nameFilter;
 		this.keybindings = keybindings;
-		this.currentSessionCanonicalPath = canonicalizePath(currentSessionFilePath);
+		this.currentSessionPathKey = currentSessionFilePath ? getSessionPathKey(currentSessionFilePath) : undefined;
 		this.filterSessions("");
 
 		// Handle Enter in search input - select current item
@@ -375,11 +346,6 @@ class SessionList implements Component, Focusable {
 
 	setNameFilter(nameFilter: NameFilter): void {
 		this.nameFilter = nameFilter;
-		this.filterSessions(this.searchInput.getValue());
-	}
-
-	setRoleFilter(roleFilter: RoleFilter): void {
-		this.roleFilter = roleFilter;
 		this.filterSessions(this.searchInput.getValue());
 	}
 
@@ -407,10 +373,9 @@ class SessionList implements Component, Focusable {
 			this.filteredSessions = flattenSessionTree(roots);
 		} else {
 			// Other modes or with search: flat list
-			const filtered = filterAndSortSessions(nameFiltered, query, this.sortMode, "all", this.roleFilter);
-			this.filteredSessions = filtered.map(({ session, bestMessage }) => ({
+			const filtered = filterAndSortSessions(nameFiltered, query, this.sortMode, "all");
+			this.filteredSessions = filtered.map((session) => ({
 				session,
-				bestMessage,
 				depth: 0,
 				isLast: true,
 				ancestorContinues: [],
@@ -438,8 +403,8 @@ class SessionList implements Component, Focusable {
 	}
 
 	private isCurrentSessionPath(path: string): boolean {
-		if (!this.currentSessionCanonicalPath) return false;
-		return (canonicalizePath(path) ?? path) === this.currentSessionCanonicalPath;
+		if (!this.currentSessionPathKey) return false;
+		return getSessionPathKey(path) === this.currentSessionPathKey;
 	}
 
 	invalidate(): void {}
@@ -489,16 +454,9 @@ class SessionList implements Component, Focusable {
 			// Build tree prefix
 			const prefix = this.buildTreePrefix(node);
 
-			// Session display text: best-matching message while searching, else name or first message
+			// Session display text (name or first message)
 			const hasName = !!session.name;
-			let displayText: string;
-			let rolePrefix = "";
-			if (node.bestMessage) {
-				rolePrefix = node.bestMessage.role === "user" ? "u: " : "a: ";
-				displayText = node.bestMessage.text;
-			} else {
-				displayText = session.name ?? session.firstMessage;
-			}
+			const displayText = session.name ?? session.firstMessage;
 			const normalizedMessage = displayText.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 
 			// Right side: message count and age
@@ -506,10 +464,10 @@ class SessionList implements Component, Focusable {
 			const msgCount = String(session.messageCount);
 			let rightPart = `${msgCount} ${age}`;
 			if (this.showCwd && session.cwd) {
-				rightPart = `${shortenPath(session.cwd)} ${rightPart}`;
+				rightPart = `${shortenHomePath(session.cwd)} ${rightPart}`;
 			}
 			if (this.showPath) {
-				rightPart = `${shortenPath(session.path)} ${rightPart}`;
+				rightPart = `${shortenHomePath(session.path)} ${rightPart}`;
 			}
 
 			// Cursor
@@ -518,7 +476,7 @@ class SessionList implements Component, Focusable {
 			// Calculate available width for message
 			const prefixWidth = visibleWidth(prefix);
 			const rightWidth = visibleWidth(rightPart) + 2; // +2 for spacing
-			const availableForMsg = width - 2 - prefixWidth - rightWidth - rolePrefix.length; // -2 for cursor
+			const availableForMsg = width - 2 - prefixWidth - rightWidth; // -2 for cursor
 
 			const truncatedMsg = truncateToWidth(normalizedMessage, Math.max(10, availableForMsg), "…");
 
@@ -534,9 +492,6 @@ class SessionList implements Component, Focusable {
 			let styledMsg = messageColor ? theme.fg(messageColor, truncatedMsg) : truncatedMsg;
 			if (isSelected) {
 				styledMsg = theme.bold(styledMsg);
-			}
-			if (rolePrefix) {
-				styledMsg = theme.fg("dim", rolePrefix) + styledMsg;
 			}
 
 			// Build line
@@ -605,12 +560,6 @@ class SessionList implements Component, Focusable {
 
 		if (this.keybindings.matches(keyData, "app.session.toggleNamedFilter")) {
 			this.onToggleNameFilter?.();
-			return;
-		}
-
-		// Ctrl+O: cycle role filter (both -> user -> agent)
-		if (kb.matches(keyData, "app.session.toggleRoleFilter")) {
-			this.onToggleRoleFilter?.();
 			return;
 		}
 
@@ -733,6 +682,10 @@ async function deleteSessionFile(
  * Component that renders a session selector
  */
 export class SessionSelectorComponent extends Container implements Focusable {
+	get capturesViewportInput(): boolean {
+		return this.mode !== "rename";
+	}
+
 	handleInput(data: string): void {
 		if (this.mode === "rename") {
 			const kb = getKeybindings();
@@ -754,7 +707,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 	private scope: SessionScope = "current";
 	private sortMode: SortMode = "threaded";
 	private nameFilter: NameFilter = "all";
-	private roleFilter: RoleFilter = "both";
 	private currentSessions: SessionInfo[] | null = null;
 	private allSessions: SessionInfo[] | null = null;
 	private currentSessionsLoader: SessionsLoader;
@@ -857,7 +809,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		this.sessionList.onToggleScope = () => this.toggleScope();
 		this.sessionList.onToggleSort = () => this.toggleSortMode();
 		this.sessionList.onToggleNameFilter = () => this.toggleNameFilter();
-		this.sessionList.onToggleRoleFilter = () => this.toggleRoleFilter();
 		this.sessionList.onRenameSession = (sessionPath) => {
 			if (!renameSession) return;
 			if (this.scope === "current" ? this.currentLoad : this.allLoad) return;
@@ -1061,14 +1012,6 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		this.nameFilter = this.nameFilter === "all" ? "named" : "all";
 		this.header.setNameFilter(this.nameFilter);
 		this.sessionList.setNameFilter(this.nameFilter);
-		this.requestRender();
-	}
-
-	private toggleRoleFilter(): void {
-		// Cycle: both -> user -> agent -> both
-		this.roleFilter = this.roleFilter === "both" ? "user" : this.roleFilter === "user" ? "agent" : "both";
-		this.header.setRoleFilter(this.roleFilter);
-		this.sessionList.setRoleFilter(this.roleFilter);
 		this.requestRender();
 	}
 
