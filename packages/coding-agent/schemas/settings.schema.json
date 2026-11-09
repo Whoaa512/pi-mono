@@ -217,6 +217,15 @@
       "description": "Show cache cost and provider recovery notices.",
       "default": false
     },
+    "bashRewriter": {
+      "type": "string",
+      "const": "rtk",
+      "description": "Rewrite bash tool commands through the rtk CLI when it is installed."
+    },
+    "refusalFallbackModel": {
+      "type": "string",
+      "description": "Model pattern to offer when a model refuses a request, for example \"anthropic/claude-opus-4-5\". Prompts before switching."
+    },
     "externalEditor": {
       "type": "string",
       "description": "Command for Ctrl+G external editor; takes precedence over VISUAL and EDITOR."
@@ -762,6 +771,18 @@
       ],
       "description": "Lines scrolled per wheel event in fullscreen mode; numeric values are clamped from 1 to 100.",
       "default": "auto"
+    },
+    "extension-settings": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {}
+          }
+        }
+      },
+      "description": "Per-extension settings keyed by extension name; read with pi.getExtensionSettings(name)."
     },
     "queueMode": {
       "anyOf": [

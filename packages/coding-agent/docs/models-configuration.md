@@ -139,6 +139,7 @@ See [Describe model input and caching](models.md#describe-model-input-and-cachin
 | `sessionAffinityFormat` | `"openai" \| "openai-nosession" \| "openrouter"` |  | Session-affinity header format. openai sends session_id, x-client-request-id, and x-session-affinity; openai-nosession sends x-client-request-id and x-session-affinity; openrouter sends x-session-id. Does not affect prompt_cache_key. Default: auto-detected. |
 | `promptCacheKeyMode` | `"auto" \| "enabled" \| "disabled"` |  | Controls the prompt_cache_key request field. auto sends it to api.openai.com, or with long cache retention when supportsLongCacheRetention is true; enabled sends it whenever caching is active, for compatible proxies; disabled never sends it. Default: auto. |
 | `supportsLongCacheRetention` | boolean |  | Whether the provider supports long prompt cache retention (prompt_cache_retention: "24h" or Anthropic-style cache_control.ttl: "1h", depending on format). Default: auto-detected from provider and URL. |
+| `disableAnthropicCacheControl` | boolean |  | Disable automatic Anthropic-style cache_control breakpoints. By default, breakpoints are injected when the model id contains anthropic or claude. Set to true for proxies that reject unknown fields. Default: false. |
 | `vllmPriority` | number |  | vLLM scheduler priority sent as the top-level priority request field. Lower values are handled earlier and the server default is 0. Only meaningful with --scheduling-policy priority. Off by default and not set on the generated catalog. |
 
 ### `openai-responses`

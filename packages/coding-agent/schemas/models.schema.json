@@ -1042,6 +1042,10 @@
           "type": "boolean",
           "description": "Whether the provider supports long prompt cache retention. Defaults are API-specific or auto-detected."
         },
+        "disableAnthropicCacheControl": {
+          "type": "boolean",
+          "description": "Disable automatic Anthropic-style cache_control breakpoints. By default, breakpoints are injected when the model id contains anthropic or claude. Set to true for proxies that reject unknown fields. Default: false."
+        },
         "vllmPriority": {
           "type": "number",
           "description": "vLLM scheduler priority sent as the top-level priority request field. Lower values are handled earlier and the server default is 0. Only meaningful with --scheduling-policy priority. Off by default and not set on the generated catalog."
