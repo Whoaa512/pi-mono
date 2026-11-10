@@ -10,7 +10,6 @@ import {
 // Models the API may fall back to, with the price the caller is billed.
 const ALLOWED_FALLBACK_MODELS: Record<string, string[]> = {
 	"claude-fable-5": ["claude-opus-4-8", "claude-opus-5"],
-	"claude-fable-5-2": ["claude-opus-4-8", "claude-opus-5"],
 	"claude-opus-5": ["claude-opus-4-8"],
 };
 
